@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /disclaimer
+Disallow: /contact
+Disallow: /login
+Disallow: /signup
+Disallow: /forgot-password
+Disallow: /reset-password
+Disallow: /verify-email
+Disallow: /verify-otp
+
+Sitemap: https://noteshub-shaho.onrender.com/sitemap.xml

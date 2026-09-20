@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import * as pdfjsLib from "pdfjs-dist";
+import { pdfStore } from "../../utils/pdfStore";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -37,18 +38,15 @@ export default function PdfViewerPage() {
   const [hidden, setHidden] = useState(false);
   const [ready, setReady] = useState(false);
 
-  const userEmail = sessionStorage.getItem("pdf_email") || "";
-  const pdfTitle = sessionStorage.getItem("pdf_title") || "Document";
+  const storeRef = useRef(pdfStore.get());
+  const pdfData = storeRef.current.data;
+  const userEmail = storeRef.current.email;
+  const pdfTitle = storeRef.current.title;
 
   useEffect(() => {
-    const base64 = sessionStorage.getItem("pdf_data");
-    if (!base64) { navigate(-1); return; }
+    if (!pdfData) { navigate(-1); return; }
 
-    const binary = atob(base64);
-    const uint8 = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) uint8[i] = binary.charCodeAt(i);
-
-    pdfjsLib.getDocument({ data: uint8 }).promise.then((pdf) => {
+    pdfjsLib.getDocument({ data: pdfData }).promise.then((pdf) => {
       pdfDocRef.current = pdf;
       setTotalPages(pdf.numPages);
       setCurrentPage(1);
@@ -56,9 +54,7 @@ export default function PdfViewerPage() {
     });
 
     return () => {
-      sessionStorage.removeItem("pdf_data");
-      sessionStorage.removeItem("pdf_email");
-      sessionStorage.removeItem("pdf_title");
+      pdfStore.clear();
     };
   }, []);
 
@@ -96,18 +92,12 @@ export default function PdfViewerPage() {
       await task.promise;
 
       ctx.save();
-      ctx.globalAlpha = 0.10;
+      ctx.globalAlpha = 0.18;
       ctx.fillStyle = "#4f46e5";
-      ctx.font = `bold ${Math.max(14, viewport.width / 22)}px Inter, sans-serif`;
-      ctx.translate(viewport.width / 2, viewport.height / 2);
-      ctx.rotate(-Math.PI / 6);
-      const wText = `${userEmail} · NotesHub`;
-      const wWidth = ctx.measureText(wText).width;
-      for (let y = -viewport.height; y < viewport.height; y += 130) {
-        for (let x = -viewport.width; x < viewport.width; x += wWidth + 60) {
-          ctx.fillText(wText, x, y);
-        }
-      }
+      ctx.font = `bold ${Math.max(11, viewport.width / 28)}px Inter, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText(userEmail, viewport.width / 2, Math.max(11, viewport.width / 28) + 10);
+      ctx.fillText(userEmail, viewport.width / 2, viewport.height - 18);
       ctx.restore();
     } catch (e) {
       if (e?.name !== "RenderingCancelledException") console.error(e);
@@ -204,12 +194,36 @@ export default function PdfViewerPage() {
           display: "flex", justifyContent: "center", alignItems: "flex-start",
           padding: "1rem", touchAction: "pan-x pan-y",
           WebkitOverflowScrolling: "touch",
+          position: "relative",
         }}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
         onContextMenu={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}
       >
+        <button
+          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+          disabled={currentPage <= 1 || rendering}
+          style={{
+            position: "fixed", left: "clamp(6px, 2vw, 16px)", top: "50%", transform: "translateY(-50%)",
+            zIndex: 20,
+            width: "clamp(36px, 5vw, 48px)", height: "clamp(36px, 5vw, 48px)",
+            borderRadius: "50%",
+            border: "1px solid rgba(255,255,255,0.15)",
+            background: "rgba(15,23,42,0.7)",
+            color: "white", fontSize: "clamp(1rem, 2.5vw, 1.4rem)",
+            cursor: currentPage <= 1 ? "not-allowed" : "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            backdropFilter: "blur(8px)",
+            WebkitBackdropFilter: "blur(8px)",
+            opacity: currentPage <= 1 ? 0.25 : 1,
+            transition: "opacity 0.2s ease, transform 0.15s ease",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.4)",
+          }}
+        >
+          ‹
+        </button>
+
         <canvas
           ref={canvasRef}
           style={{
@@ -218,6 +232,29 @@ export default function PdfViewerPage() {
             pointerEvents: "none",
           }}
         />
+
+        <button
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+          disabled={currentPage >= totalPages || rendering}
+          style={{
+            position: "fixed", right: "clamp(6px, 2vw, 16px)", top: "50%", transform: "translateY(-50%)",
+            zIndex: 20,
+            width: "clamp(36px, 5vw, 48px)", height: "clamp(36px, 5vw, 48px)",
+            borderRadius: "50%",
+            border: "1px solid rgba(255,255,255,0.15)",
+            background: "rgba(15,23,42,0.7)",
+            color: "white", fontSize: "clamp(1rem, 2.5vw, 1.4rem)",
+            cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            backdropFilter: "blur(8px)",
+            WebkitBackdropFilter: "blur(8px)",
+            opacity: currentPage >= totalPages ? 0.25 : 1,
+            transition: "opacity 0.2s ease, transform 0.15s ease",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.4)",
+          }}
+        >
+          ›
+        </button>
       </div>
     </div>
   );

@@ -4,6 +4,8 @@ import { useAuth } from "../../context/AuthContext";
 import { api } from "../../services/api";
 import { getDeviceFingerprint } from "../../utils/fingerprint";
 import PurchaseModal from "../../components/modals/PurchaseModal";
+import { pdfStore } from "../../utils/pdfStore";
+
 import "./app.css";
 
 const BackIcon = () => (
@@ -74,7 +76,13 @@ export default function PaidNoteViewer() {
   useEffect(() => {
     if (!fingerprint || !isAuthenticated) return;
     api.paidNotes.checkEntitlement(noteKey, deviceToken, fingerprint)
-      .then(() => setEntitlementStatus("authorized"))
+      .then((res) => {
+        if (res.data?.deviceToken) {
+          localStorage.setItem(`device_token_${noteKey}`, res.data.deviceToken);
+          setDeviceToken(res.data.deviceToken);
+        }
+        setEntitlementStatus("authorized");
+      })
       .catch((err) => {
         const msg = err.response?.data?.message || "";
         if (msg === "Device not authorized") {
@@ -90,17 +98,17 @@ export default function PaidNoteViewer() {
     if (entitlementStatus === "not-purchased") { setPurchaseTarget(file); return; }
     if (entitlementStatus === "device-blocked") return;
 
+    const currentDeviceToken = localStorage.getItem(`device_token_${noteKey}`);
     setOpeningFile(file.name);
     try {
-      const res = await api.paidNotes.streamFile(noteKey, file.name, deviceToken, fingerprint);
+      const res = await api.paidNotes.streamFile(noteKey, file.name, currentDeviceToken, fingerprint);
       const arrayBuffer = res.data;
       const uint8 = new Uint8Array(arrayBuffer);
-      const base64 = btoa(
-        uint8.reduce((data, byte) => data + String.fromCharCode(byte), "")
+      pdfStore.set(
+        uint8,
+        user?.email || "",
+        file.name.replace(/_[a-z0-9]{4,}$/i, "").replace(/\.[^.]+$/, "")
       );
-      sessionStorage.setItem("pdf_data", base64);
-      sessionStorage.setItem("pdf_email", user?.email || "");
-      sessionStorage.setItem("pdf_title", file.name.replace(/_[a-z0-9]{4,}$/i, "").replace(/\.[^.]+$/, ""));
       navigate("/pdf-viewer");
     } catch (err) {
       const msg = err.response?.data?.message || "";
@@ -108,6 +116,7 @@ export default function PaidNoteViewer() {
         setEntitlementStatus("not-purchased");
         setPurchaseTarget(file);
       } else {
+        console.error("streamFile error:", err);
         alert("Failed to open file. Please try again.");
       }
     } finally {

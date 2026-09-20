@@ -61,18 +61,16 @@ const AnimatedRoutes = () => {
   return (
     <>
       <ScrollToTop />
-      <Navbar />
+      {location.pathname !== "/pdf-viewer" && <Navbar />}
       {showTerms && (
         <TermsModal onAccept={handleAcceptTerms} onDecline={handleDeclineTerms} />
       )}
       <AnimatePresence mode="wait">
         <Routes location={location} key={location.pathname}>
           <Route path="/auth/callback" element={<OAuthCallback />} />
-
           <Route path="/dashboard" element={<ProtectedRoute><PageWrapper><Dashboard /></PageWrapper></ProtectedRoute>} />
           <Route path="/disclaimer" element={<ProtectedRoute><PageWrapper><Disclaimer /></PageWrapper></ProtectedRoute>} />
           <Route path="/contact" element={<ProtectedRoute><PageWrapper><ContactUs /></PageWrapper></ProtectedRoute>} />
-
           <Route path="/access-notes" element={<PageWrapper><AccessNotes /></PageWrapper>} />
           <Route path="/subjects/:university/:semester" element={<PageWrapper><Subjects /></PageWrapper>} />
           <Route path="/notes/:university/:semester/:subject" element={<PageWrapper><Files /></PageWrapper>} />
@@ -80,7 +78,6 @@ const AnimatedRoutes = () => {
           <Route path="/paid-notes/:university/:semester/:subject" element={<ProtectedRoute><PageWrapper><PaidNoteViewer /></PageWrapper></ProtectedRoute>} />
           <Route path="/paid-notes/:university/:semester/:subject/:subSubject" element={<ProtectedRoute><PageWrapper><PaidNoteViewer /></PageWrapper></ProtectedRoute>} />
           <Route path="/pdf-viewer" element={<ProtectedRoute><PdfViewerPage /></ProtectedRoute>} />
-
           {authRoutes.map((route, index) => (
             <Route key={index} path={route.path} element={route.element} />
           ))}

@@ -37,7 +37,10 @@ const LockIcon = () => (
 function PdfViewer({ pdfData, userEmail, onClose }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
+  const scrollContainerRef = useRef(null);
   const pdfDocRef = useRef(null);
+  const renderTaskRef = useRef(null);
+  const pinchRef = useRef({ active: false, startDist: 0, startScale: 1 });
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [scale, setScale] = useState(1.2);
@@ -48,6 +51,18 @@ function PdfViewer({ pdfData, userEmail, onClose }) {
     const handleVisibility = () => setHidden(document.hidden);
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const preventSave = (e) => e.preventDefault();
+    el.addEventListener("contextmenu", preventSave);
+    el.addEventListener("dragstart", preventSave);
+    return () => {
+      el.removeEventListener("contextmenu", preventSave);
+      el.removeEventListener("dragstart", preventSave);
+    };
   }, []);
 
   useEffect(() => {
@@ -67,35 +82,79 @@ function PdfViewer({ pdfData, userEmail, onClose }) {
   }, [currentPage, scale, pdfDocRef.current]);
 
   const renderPage = async (pageNum) => {
-    if (!pdfDocRef.current || rendering) return;
+    if (!pdfDocRef.current) return;
+    if (renderTaskRef.current) {
+      renderTaskRef.current.cancel();
+      renderTaskRef.current = null;
+    }
     setRendering(true);
     try {
       const page = await pdfDocRef.current.getPage(pageNum);
-      const viewport = page.getViewport({ scale });
+      const dpr = window.devicePixelRatio || 1;
+      const viewport = page.getViewport({ scale: scale * dpr });
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      await page.render({ canvasContext: ctx, viewport }).promise;
+      canvas.style.width = `${viewport.width / dpr}px`;
+      canvas.style.height = `${viewport.height / dpr}px`;
+      const task = page.render({ canvasContext: ctx, viewport });
+      renderTaskRef.current = task;
+      await task.promise;
 
       ctx.save();
       ctx.globalAlpha = 0.10;
       ctx.fillStyle = "#4f46e5";
-      ctx.font = `bold ${Math.max(12, viewport.width / 28)}px Inter, sans-serif`;
+      ctx.font = `bold ${Math.max(14, viewport.width / 22)}px Inter, sans-serif`;
       ctx.translate(viewport.width / 2, viewport.height / 2);
       ctx.rotate(-Math.PI / 6);
       const wText = `${userEmail} · NotesHub`;
       const wWidth = ctx.measureText(wText).width;
-      for (let y = -viewport.height; y < viewport.height; y += 120) {
+      for (let y = -viewport.height; y < viewport.height; y += 130) {
         for (let x = -viewport.width; x < viewport.width; x += wWidth + 60) {
           ctx.fillText(wText, x, y);
         }
       }
       ctx.restore();
+    } catch (e) {
+      if (e?.name !== "RenderingCancelledException") console.error(e);
     } finally {
       setRendering(false);
     }
+  };
+
+  const handleCanvasTap = (e) => {
+    if (e.type === "click") {
+      setScale((s) => s < 2.0 ? Math.min(3, s + 0.4) : 1.2);
+    }
+  };
+
+  const handleTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchRef.current = {
+        active: true,
+        startDist: Math.sqrt(dx * dx + dy * dy),
+        startScale: scale,
+      };
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    if (!pinchRef.current.active || e.touches.length !== 2) return;
+    e.preventDefault();
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const ratio = dist / pinchRef.current.startDist;
+    const newScale = Math.min(3, Math.max(0.5, pinchRef.current.startScale * ratio));
+    setScale(parseFloat(newScale.toFixed(1)));
+  };
+
+  const handleTouchEnd = () => {
+    pinchRef.current.active = false;
   };
 
   return (
@@ -138,9 +197,22 @@ function PdfViewer({ pdfData, userEmail, onClose }) {
         </div>
       </div>
 
-      <div style={{ overflowY: "auto", overflowX: "auto", maxHeight: "80vh", display: "flex", justifyContent: "center", padding: "1rem", userSelect: "none" }}>
-        <canvas ref={canvasRef} style={{ display: "block", maxWidth: "100%", userSelect: "none" }} />
+      <div
+        ref={scrollContainerRef}
+        style={{ overflowY: "auto", overflowX: "auto", maxHeight: "80vh", display: "flex", justifyContent: "center", padding: "1rem", userSelect: "none", touchAction: "pan-x pan-y" }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        <canvas
+          ref={canvasRef}
+          onClick={handleCanvasTap}
+          style={{ display: "block", userSelect: "none", cursor: "zoom-in", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
+        />
       </div>
+      <p style={{ color: "#475569", fontSize: "0.7rem", textAlign: "center", padding: "6px 0 8px", margin: 0, background: "#0f172a" }}>
+        Tap to zoom · Pinch to zoom on mobile
+      </p>
     </div>
   );
 }

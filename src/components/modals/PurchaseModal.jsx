@@ -37,7 +37,7 @@ export default function PurchaseModal({ noteKey, noteTitle, deviceFingerprint, o
         order_id: orderId,
         handler: async (response) => {
           try {
-            await api.paidNotes.verifyPurchase(
+            const verifyRes = await api.paidNotes.verifyPurchase(
               {
                 razorpay_order_id: response.razorpay_order_id,
                 razorpay_payment_id: response.razorpay_payment_id,
@@ -46,6 +46,9 @@ export default function PurchaseModal({ noteKey, noteTitle, deviceFingerprint, o
               },
               deviceFingerprint
             );
+            if (verifyRes.data?.deviceToken) {
+              localStorage.setItem(`device_token_${noteKey}`, verifyRes.data.deviceToken);
+            }
             onSuccess();
           } catch {
             setError("Payment verification failed. Contact support.");

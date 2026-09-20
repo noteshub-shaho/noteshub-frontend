@@ -56,13 +56,19 @@ export const api = {
       client.post("/api/paid-notes/purchase/verify", data, {
         headers: { "x-device-fingerprint": deviceFingerprint },
       }),
-    checkEntitlement: (noteKey, deviceFingerprint) =>
+    checkEntitlement: (noteKey, deviceToken, deviceFingerprint) =>
       client.get(`/api/paid-notes/entitlement/${noteKey}`, {
-        headers: { "x-device-fingerprint": deviceFingerprint },
+        headers: {
+          "x-device-token": deviceToken,
+          "x-device-fingerprint": deviceFingerprint,
+        },
       }),
-    getSignedAccess: (noteKey, deviceFingerprint) =>
+    getSignedAccess: (noteKey, deviceToken, deviceFingerprint) =>
       client.get(`/api/paid-notes/access/${noteKey}`, {
-        headers: { "x-device-fingerprint": deviceFingerprint },
+        headers: {
+          "x-device-token": deviceToken,
+          "x-device-fingerprint": deviceFingerprint,
+        },
       }),
     admin: {
       list: () => client.get("/api/paid-notes/admin/list"),

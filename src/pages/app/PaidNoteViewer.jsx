@@ -28,13 +28,6 @@ const LockIcon = () => (
   </svg>
 );
 
-const DownloadIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="7 10 12 15 17 10" />
-    <line x1="12" y1="15" x2="12" y2="3" />
-  </svg>
-);
 
 export default function PaidNoteViewer() {
   const { university, semester, subject, subSubject } = useParams();
@@ -51,11 +44,12 @@ export default function PaidNoteViewer() {
   const [fileList, setFileList] = useState([]);
   const [entitlementStatus, setEntitlementStatus] = useState("unknown");
   const [fingerprint, setFingerprint] = useState(null);
+  const [deviceToken, setDeviceToken] = useState(null);
   const [purchaseTarget, setPurchaseTarget] = useState(null);
   const [openingFile, setOpeningFile] = useState(null);
-  const [downloadingFile, setDownloadingFile] = useState(null);
   const [viewerFile, setViewerFile] = useState(null);
   const [signedCache, setSignedCache] = useState({});
+  const [viewerBlurred, setViewerBlurred] = useState(false);
   const refreshTimerRef = useRef(null);
 
   useEffect(() => {
@@ -66,7 +60,9 @@ export default function PaidNoteViewer() {
 
   useEffect(() => {
     getDeviceFingerprint().then(setFingerprint);
-  }, []);
+    const stored = localStorage.getItem(`device_token_${noteKey}`);
+    if (stored) setDeviceToken(stored);
+  }, [noteKey]);
 
   useEffect(() => {
     api.paidNotes.getFileList(noteKey)
@@ -83,7 +79,7 @@ export default function PaidNoteViewer() {
 
   useEffect(() => {
     if (!fingerprint || !isAuthenticated) return;
-    api.paidNotes.checkEntitlement(noteKey, fingerprint)
+    api.paidNotes.checkEntitlement(noteKey, deviceToken, fingerprint)
       .then(() => setEntitlementStatus("authorized"))
       .catch((err) => {
         const msg = err.response?.data?.message || "";
@@ -93,19 +89,28 @@ export default function PaidNoteViewer() {
           setEntitlementStatus("not-purchased");
         }
       });
-  }, [fingerprint, isAuthenticated, noteKey]);
+  }, [fingerprint, isAuthenticated, noteKey, deviceToken]);
 
   const fetchSignedAccess = useCallback(async (fp) => {
-    const res = await api.paidNotes.getSignedAccess(noteKey, fp);
+    const res = await api.paidNotes.getSignedAccess(noteKey, deviceToken, fp);
     const map = {};
     (res.data.files || []).forEach((f) => { map[f.name] = f; });
     setSignedCache(map);
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => fetchSignedAccess(fp), 12 * 60 * 1000);
     return map;
-  }, [noteKey]);
+  }, [noteKey, deviceToken]);
 
   useEffect(() => () => { if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current); }, []);
+
+  useEffect(() => {
+    if (!viewerFile) return;
+    const handleVisibility = () => {
+      setViewerBlurred(document.hidden);
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [viewerFile]);
 
   const getSignedUrl = async (fileName) => {
     if (signedCache[fileName]) return signedCache[fileName].signedUrl;
@@ -134,33 +139,6 @@ export default function PaidNoteViewer() {
     }
   };
 
-  const handleDownload = async (file) => {
-    if (entitlementStatus === "not-purchased") {
-      setPurchaseTarget(file);
-      return;
-    }
-    if (entitlementStatus === "device-blocked") return;
-    setDownloadingFile(file.name);
-    try {
-      const url = await getSignedUrl(file.name);
-      if (!url) return;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error();
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = objectUrl;
-      a.download = `${file.name}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      alert("Failed to download. Please try again.");
-    } finally {
-      setDownloadingFile(null);
-    }
-  };
 
   const handleBack = () => navigate(`/subjects/${university}/${semester}`);
 
@@ -198,7 +176,6 @@ export default function PaidNoteViewer() {
             {fileList.map((file, index) => {
               const isPurchased = entitlementStatus === "authorized";
               const isOpening = openingFile === file.name;
-              const isDownloading = downloadingFile === file.name;
 
               return (
                 <div key={index} className="notes-card" style={{ position: "relative" }}>
@@ -217,7 +194,7 @@ export default function PaidNoteViewer() {
                     margin: "0 0 0", fontWeight: 700, fontSize: "1.1rem",
                     color: "#0f172a", paddingRight: !isPurchased ? "60px" : 0,
                   }}>
-                    {file.name.replace(/\.[^.]+$/, "")}
+                    {file.name.replace(/_[a-z0-9]{4,}$/i, "").replace(/\.[^.]+$/, "")}
                   </h3>
                   <div style={{ marginTop: 14, display: "flex", gap: "8px", alignItems: "center" }}>
                     <button
@@ -230,28 +207,6 @@ export default function PaidNoteViewer() {
                         <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                           <LockIcon /> Buy to Open
                         </span>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => handleDownload(file)}
-                      disabled={isDownloading || entitlementStatus === "device-blocked"}
-                      title="Download PDF"
-                      style={{
-                        flexShrink: 0, width: "36px", height: "36px", minWidth: "36px",
-                        padding: 0, border: "none", borderRadius: "9px",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        cursor: isDownloading || entitlementStatus === "device-blocked" ? "not-allowed" : "pointer",
-                        opacity: isDownloading ? 0.7 : 1,
-                        background: "linear-gradient(135deg, #4f46e5, #6366f1)",
-                        boxShadow: "0 4px 12px rgba(79, 70, 229, 0.35)",
-                      }}
-                    >
-                      {isDownloading ? (
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}>
-                          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                        </svg>
-                      ) : (
-                        <DownloadIcon />
                       )}
                     </button>
                   </div>
@@ -276,28 +231,45 @@ export default function PaidNoteViewer() {
                     cursor: "pointer", fontFamily: "Inter, system-ui, sans-serif",
                   }}
                 >
-                  {f.name.replace(/\.[^.]+$/, "")}
+                  {f.name.replace(/_[a-z0-9]{4,}$/i, "").replace(/\.[^.]+$/, "")}
                 </button>
               ))}
             </div>
             <div style={{ position: "relative" }}>
+              {viewerBlurred && (
+                <div style={{
+                  position: "absolute", inset: 0, zIndex: 20, background: "rgba(15,23,42,0.85)",
+                  display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "12px",
+                }}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                  <p style={{ color: "white", fontWeight: 700, fontSize: "0.95rem", margin: 0 }}>Content hidden while tab is inactive</p>
+                </div>
+              )}
               <div style={{
                 position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none",
-                display: "flex", alignItems: "center", justifyContent: "center",
+                display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gridTemplateRows: "repeat(3, 1fr)",
+                padding: "2rem", gap: "1rem",
               }}>
-                <p style={{
-                  color: "rgba(79,70,229,0.18)", fontSize: "clamp(14px, 2.5vw, 22px)",
-                  fontWeight: 800, transform: "rotate(-30deg)", userSelect: "none",
-                  whiteSpace: "nowrap", letterSpacing: "1px",
-                }}>
-                  Purchased by: {user?.email} | NotesHub
-                </p>
+                {[...Array(6)].map((_, i) => (
+                  <p key={i} style={{
+                    color: "rgba(79,70,229,0.13)", fontSize: "clamp(11px, 1.8vw, 16px)",
+                    fontWeight: 800, transform: "rotate(-30deg)", userSelect: "none",
+                    whiteSpace: "nowrap", letterSpacing: "0.5px", margin: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {user?.email} · NotesHub
+                  </p>
+                ))}
               </div>
-              <iframe
-                src={viewerFile.signedUrl}
-                title={viewerFile.name}
-                style={{ width: "100%", height: "80vh", border: "none", display: "block" }}
-              />
+            <iframe
+              src={`${viewerFile.signedUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+              title={viewerFile.name}
+              style={{ width: "100%", height: "80vh", border: "none", display: "block" }}
+              onContextMenu={(e) => e.preventDefault()}
+            />
             </div>
           </div>
         )}
@@ -310,6 +282,8 @@ export default function PaidNoteViewer() {
           deviceFingerprint={fingerprint}
           onClose={() => setPurchaseTarget(null)}
           onSuccess={() => {
+            const stored = localStorage.getItem(`device_token_${noteKey}`);
+            if (stored) setDeviceToken(stored);
             setPurchaseTarget(null);
             setEntitlementStatus("authorized");
             setSignedCache({});

@@ -63,6 +63,14 @@ export const api = {
           "x-device-fingerprint": deviceFingerprint,
         },
       }),
+    streamFile: (noteKey, fileName, deviceToken, deviceFingerprint) =>
+      client.get(`/api/paid-notes/stream/${noteKey}/file/${encodeURIComponent(fileName)}`, {
+        headers: {
+          "x-device-token": deviceToken,
+          "x-device-fingerprint": deviceFingerprint,
+        },
+        responseType: "arraybuffer",
+      }),
     getSignedAccess: (noteKey, deviceToken, deviceFingerprint) =>
       client.get(`/api/paid-notes/access/${noteKey}`, {
         headers: {

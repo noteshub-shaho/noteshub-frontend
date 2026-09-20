@@ -14,6 +14,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 
 import Dashboard from "./pages/app/Dashboard";
 import PaidNoteViewer from "./pages/app/PaidNoteViewer";
+import PdfViewerPage from "./pages/app/PdfViewerPage";
 import AccessNotes from "./pages/app/AccessNotes";
 import ContactUs from "./pages/app/ContactUs";
 import Subjects from "./pages/app/Subjects";
@@ -78,6 +79,7 @@ const AnimatedRoutes = () => {
           <Route path="/notes/:university/:semester/:subject/:subSubject" element={<PageWrapper><Files /></PageWrapper>} />
           <Route path="/paid-notes/:university/:semester/:subject" element={<ProtectedRoute><PageWrapper><PaidNoteViewer /></PageWrapper></ProtectedRoute>} />
           <Route path="/paid-notes/:university/:semester/:subject/:subSubject" element={<ProtectedRoute><PageWrapper><PaidNoteViewer /></PageWrapper></ProtectedRoute>} />
+          <Route path="/pdf-viewer" element={<ProtectedRoute><PdfViewerPage /></ProtectedRoute>} />
 
           {authRoutes.map((route, index) => (
             <Route key={index} path={route.path} element={route.element} />

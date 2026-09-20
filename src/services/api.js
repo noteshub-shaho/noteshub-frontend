@@ -48,6 +48,34 @@ export const api = {
     verifyPayment: (data) => client.post("/api/donations/verify", data),
   },
 
+  paidNotes: {
+    getConfig: (noteKey) => client.get(`/api/paid-notes/config/${noteKey}`),
+    getFileList: (noteKey) => client.get(`/api/paid-notes/files/${noteKey}`),
+    createOrder: (noteKey) => client.post("/api/paid-notes/purchase/create-order", { noteKey }),
+    verifyPurchase: (data, deviceFingerprint) =>
+      client.post("/api/paid-notes/purchase/verify", data, {
+        headers: { "x-device-fingerprint": deviceFingerprint },
+      }),
+    checkEntitlement: (noteKey, deviceFingerprint) =>
+      client.get(`/api/paid-notes/entitlement/${noteKey}`, {
+        headers: { "x-device-fingerprint": deviceFingerprint },
+      }),
+    getSignedAccess: (noteKey, deviceFingerprint) =>
+      client.get(`/api/paid-notes/access/${noteKey}`, {
+        headers: { "x-device-fingerprint": deviceFingerprint },
+      }),
+    admin: {
+      list: () => client.get("/api/paid-notes/admin/list"),
+      create: (data) => client.post("/api/paid-notes/admin/create", data),
+      update: (noteKey, data) => client.put(`/api/paid-notes/admin/update/${noteKey}`, data),
+      delete: (noteKey) => client.delete(`/api/paid-notes/admin/delete/${noteKey}`),
+      purchases: (noteKey) =>
+        client.get("/api/paid-notes/admin/purchases", { params: noteKey ? { noteKey } : {} }),
+      resetDevice: (userId, noteKey) =>
+        client.post("/api/paid-notes/admin/reset-device", { userId, noteKey }),
+    },
+  },
+
   admin: {
     upload: (formData) =>
       client.post("/api/admin/upload", formData, {

@@ -46,9 +46,26 @@ const Subjects = () => {
   const pageDesc = `Browse all ${semLabel} subjects for ${uniName} on NotesHub. Free engineering notes, assignments, and study material for every subject.`;
   const canonicalUrl = `${import.meta.env.VITE_FRONTEND_URL}/subjects/${university}/${semester}`;
 
-const handleSubjectClick = (subject) => {
-    if (nestedSubjects[subject]) {
-      setActiveParent(subject);
+  const checkAndNavigate = async (subject, subSubject = null) => {
+    const noteKey = subSubject
+      ? `${university}/${semester}/${subject}/${subSubject}`
+      : `${university}/${semester}/${subject}`;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/paid-notes/config/${noteKey}`);
+      const data = await res.json();
+      if (data.success && data.isEnabled) {
+        if (subSubject) {
+          navigate(`/paid-notes/${university}/${semester}/${subject}/${subSubject}`);
+        } else {
+          navigate(`/paid-notes/${university}/${semester}/${subject}`);
+        }
+        return;
+      }
+    } catch {}
+    if (subSubject) {
+      navigate(`/notes/${university}/${semester}/${subject}/${subSubject}`, {
+        state: { university, semester, activeParent: subject },
+      });
     } else {
       navigate(`/notes/${university}/${semester}/${subject}`, {
         state: { university, semester },
@@ -56,10 +73,16 @@ const handleSubjectClick = (subject) => {
     }
   };
 
+  const handleSubjectClick = (subject) => {
+    if (nestedSubjects[subject]) {
+      setActiveParent(subject);
+    } else {
+      checkAndNavigate(subject);
+    }
+  };
+
   const handleSubClick = (sub) => {
-    navigate(`/notes/${university}/${semester}/${activeParent}/${sub}`, {
-      state: { university, semester, activeParent },
-    });
+    checkAndNavigate(activeParent, sub);
   };
   const displayList = activeParent ? nestedSubjects[activeParent] : subjects;
 

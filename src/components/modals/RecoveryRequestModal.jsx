@@ -148,7 +148,7 @@ export default function RecoveryRequestModal({ noteKey, noteTitle, purchaseDate,
               rows={5}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="Explain your issue. For example, I purchased these notes on my OnePlus Nord 5, but after clearing Chrome data, NotesHub says they were purchased on another device."
+              placeholder="Explain your issue. For example, I purchased these notes on my this device, but after clearing Chrome data, NotesHub says they were purchased on another device."
               style={{
                 width: "100%", boxSizing: "border-box", resize: "vertical",
                 padding: "0.75rem 0.9rem", borderRadius: "10px",

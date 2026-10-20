@@ -1,62 +1,462 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as pdfjsLib from "pdfjs-dist";
 import { pdfStore } from "../../utils/pdfStore";
+import "./pdfViewer.css";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url
 ).toString();
 
+/** Maximum rendered width (CSS px) of a page on very large screens. */
+const MAX_PAGE_WIDTH = 900;
+/** Zoom multiplicative step. */
+const ZOOM_STEP = 1.25;
+const MIN_SCALE = 0.15;
+const MAX_SCALE = 6;
+/** Pages within this margin of the viewport are rendered. */
+const NEAR_PX = 800;
+/** Pages beyond this margin have their canvases released. */
+const FAR_PX = 3000;
+/** Cap devicePixelRatio to limit canvas memory usage. */
+const DPR_CAP = 2;
+
+const CloseIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+
+const FitWidthIcon = () => (
+  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 3 21 3 21 9" />
+    <polyline points="9 21 3 21 3 15" />
+    <line x1="21" y1="3" x2="14" y2="10" />
+    <line x1="3" y1="21" x2="10" y2="14" />
+  </svg>
+);
+
+const FullscreenIcon = () => (
+  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+    <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+    <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+    <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+  </svg>
+);
+
 const DotsLoader = () => (
-  <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: "#1e1e2e" }}>
-    <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "#4f46e5", margin: 0 }}>Loading</p>
-    <div style={{ display: "flex", gap: 8 }}>
-      {[0, 1, 2].map((i) => (
-        <span key={i} style={{
-          width: 10, height: 10, borderRadius: "50%", background: "#4f46e5",
-          display: "inline-block",
-          animation: "dotBounce 0.6s ease-in-out infinite",
-          animationDelay: `${i * 0.15}s`,
-        }} />
-      ))}
+  <div className="pv-loader-wrap">
+    <p className="pv-loader-label">Loading</p>
+    <div className="pv-dots">
+      <span className="pv-dot" />
+      <span className="pv-dot" />
+      <span className="pv-dot" />
     </div>
   </div>
 );
 
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
 export default function PdfViewerPage() {
   const navigate = useNavigate();
-  const canvasRef = useRef(null);
+  const rootRef = useRef(null);
+  const scrollRef = useRef(null);
+  const pagesElRef = useRef(null);
   const pdfDocRef = useRef(null);
-  const renderTaskRef = useRef(null);
-  const touchStartX = useRef(null);
+  const dimsRef = useRef([]);
+  const renderedRef = useRef(new Map());
+  const offsetsRef = useRef([]);
+  const anchorRef = useRef(null);
+  const scrollRafRef = useRef(0);
+  const scaleRef = useRef(1);
+  const fitScaleRef = useRef(0);
 
-  const [currentPage, setCurrentPage] = useState(1);
+  // Read the in-memory store once (via lazy state init, not during render via ref).
+  const [storeInfo] = useState(() => pdfStore.get());
+  const userEmail = storeInfo.email;
+  const pdfTitle = storeInfo.title;
+
+  const [dims, setDims] = useState(null);
   const [totalPages, setTotalPages] = useState(0);
-  const [scale, setScale] = useState(1.5);
-  const [rendering, setRendering] = useState(false);
+  const [availableWidth, setAvailableWidth] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [status, setStatus] = useState("loading");
   const [hidden, setHidden] = useState(false);
-  const [ready, setReady] = useState(false);
+  const [jumpOpen, setJumpOpen] = useState(false);
+  const [jumpValue, setJumpValue] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const storeRef = useRef(pdfStore.get());
-  const pdfData = storeRef.current.data;
-  const userEmail = storeRef.current.email;
-  const pdfTitle = storeRef.current.title;
+  /* ------------------------------------------------------------------ */
+  /* Document loading (secure data comes from pdfStore — unchanged flow) */
+  /* ------------------------------------------------------------------ */
 
   useEffect(() => {
-    if (!pdfData) { navigate(-1); return; }
+    const data = storeInfo.data;
+    if (!data) {
+      navigate(-1);
+      return undefined;
+    }
 
-    pdfjsLib.getDocument({ data: pdfData }).promise.then((pdf) => {
-      pdfDocRef.current = pdf;
-      setTotalPages(pdf.numPages);
-      setCurrentPage(1);
-      setReady(true);
-    });
+    let cancelled = false;
+    const renderedMap = renderedRef.current;
+    (async () => {
+      try {
+        const pdf = await pdfjsLib.getDocument({ data }).promise;
+        // Page metadata (dimensions) for every page keeps the layout stable
+        // while canvases are lazily rendered during scrolling.
+        const pageDims = await Promise.all(
+          Array.from({ length: pdf.numPages }, async (_, idx) => {
+            const page = await pdf.getPage(idx + 1);
+            const viewport = page.getViewport({ scale: 1 });
+            return { w: viewport.width, h: viewport.height };
+          })
+        );
+        if (cancelled) {
+          pdf.destroy();
+          return;
+        }
+        pdfDocRef.current = pdf;
+        dimsRef.current = pageDims;
+        setDims(pageDims);
+        setTotalPages(pdf.numPages);
+        setStatus("ready");
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Failed to load PDF:", err);
+          setStatus("error");
+        }
+      }
+    })();
 
     return () => {
+      cancelled = true;
       pdfStore.clear();
+      renderedMap.clear();
+      offsetsRef.current = [];
+      if (pdfDocRef.current) {
+        pdfDocRef.current.destroy();
+        pdfDocRef.current = null;
+      }
     };
+  }, [storeInfo.data, navigate]);
+
+  /* ---------------------------------- */
+  /* Viewport width measurement         */
+  /* ---------------------------------- */
+
+  useEffect(() => {
+    if (status !== "ready") return undefined;
+    const el = scrollRef.current;
+    if (!el) return undefined;
+
+    let frame = 0;
+    const measure = () => {
+      const cs = getComputedStyle(el);
+      const pad =
+        (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      const w = Math.max(0, Math.round(el.clientWidth - pad));
+      setAvailableWidth((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+    };
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+
+    schedule();
+    const ro = new ResizeObserver(schedule);
+    ro.observe(el);
+    window.addEventListener("resize", schedule);
+    window.addEventListener("orientationchange", schedule);
+    window.visualViewport?.addEventListener("resize", schedule);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("orientationchange", schedule);
+      window.visualViewport?.removeEventListener("resize", schedule);
+    };
+  }, [status]);
+
+  /* ---------------------------------- */
+  /* Scale                              */
+  /* ---------------------------------- */
+
+  const fitScale = useMemo(() => {
+    if (!dims || !availableWidth) return 0;
+    const maxW = dims.reduce((m, d) => Math.max(m, d.w), 0);
+    if (!maxW) return 0;
+    return Math.min(availableWidth, MAX_PAGE_WIDTH) / maxW;
+  }, [dims, availableWidth]);
+
+  const scale = fitScale * zoom;
+
+  useLayoutEffect(() => {
+    scaleRef.current = scale;
+    fitScaleRef.current = fitScale;
+  }, [scale, fitScale]);
+
+  /* ---------------------------------- */
+  /* Page rendering (lazy + recycling)  */
+  /* ---------------------------------- */
+
+  const renderPageAt = useCallback(
+    async (i) => {
+      const pdf = pdfDocRef.current;
+      const dimsArr = dimsRef.current;
+      const node = pagesElRef.current?.children[i];
+      if (!pdf || !dimsArr[i] || !node) return;
+
+      const run = { scale: scaleRef.current, task: null };
+      renderedRef.current.set(i, run);
+
+      try {
+        const page = await pdf.getPage(i + 1);
+        if (renderedRef.current.get(i) !== run) return;
+
+        const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+        const viewport = page.getViewport({ scale: run.scale * dpr });
+        const canvas = node.querySelector("canvas");
+        if (!canvas) return;
+
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const task = page.render({ canvas, viewport });
+        run.task = task;
+        await task.promise;
+        if (renderedRef.current.get(i) !== run) return;
+
+        // Per-user watermark — identical content, placement and style to the
+        // original single-page viewer.
+        const ctx = canvas.getContext("2d");
+        ctx.save();
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = "#4f46e5";
+        ctx.font = `bold ${Math.max(11, viewport.width / 28)}px Inter, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText(userEmail, viewport.width / 2, Math.max(11, viewport.width / 28) + 10);
+        ctx.fillText(userEmail, viewport.width / 2, viewport.height - 18);
+        ctx.restore();
+
+        node.classList.remove("pv-error");
+        node.classList.add("pv-rendered");
+      } catch (err) {
+        if (err?.name !== "RenderingCancelledException") {
+          console.error(`Failed to render PDF page ${i + 1}:`, err);
+          if (renderedRef.current.get(i) === run) node.classList.add("pv-error");
+        }
+      }
+    },
+    [userEmail]
+  );
+
+  const discardPage = useCallback((i) => {
+    const entry = renderedRef.current.get(i);
+    if (!entry) return;
+    if (entry.task) {
+      try {
+        entry.task.cancel();
+      } catch {
+        /* already finished or cancelled */
+      }
+    }
+    renderedRef.current.delete(i);
+    const node = pagesElRef.current?.children[i];
+    if (!node) return;
+    node.classList.remove("pv-rendered");
+    const canvas = node.querySelector("canvas");
+    if (canvas) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }, []);
+
+  const ensureRendered = useCallback(
+    (i) => {
+      const entry = renderedRef.current.get(i);
+      if (entry && Math.abs(entry.scale - scaleRef.current) < 1e-3) return;
+      if (entry?.task) {
+        try {
+          entry.task.cancel();
+        } catch {
+          /* already finished or cancelled */
+        }
+      }
+      void renderPageAt(i);
+    },
+    [renderPageAt]
+  );
+
+  const managePages = useCallback(() => {
+    const el = scrollRef.current;
+    const offs = offsetsRef.current;
+    if (!el || !offs.length) return;
+    const vh = el.clientHeight;
+    const top = el.scrollTop;
+    for (let i = 0; i < offs.length; i++) {
+      const p = offs[i];
+      if (!p) continue;
+      const nearStart = p.top + p.height > top - NEAR_PX;
+      const nearEnd = p.top < top + vh + NEAR_PX;
+      if (nearStart && nearEnd) {
+        ensureRendered(i);
+      } else if (!(p.top + p.height > top - FAR_PX && p.top < top + vh + FAR_PX)) {
+        discardPage(i);
+      }
+    }
+  }, [ensureRendered, discardPage]);
+
+  const updateCurrentPage = useCallback(() => {
+    const el = scrollRef.current;
+    const offs = offsetsRef.current;
+    if (!el || !offs.length) return;
+    const probe = el.scrollTop + el.clientHeight * 0.25;
+    let idx = 0;
+    for (let i = 0; i < offs.length; i++) {
+      if (offs[i] && offs[i].top <= probe) idx = i;
+      else break;
+    }
+    setCurrentPage((prev) => (prev === idx + 1 ? prev : idx + 1));
+  }, []);
+
+  const measureOffsets = useCallback(() => {
+    const scrollEl = scrollRef.current;
+    const docEl = pagesElRef.current;
+    if (!scrollEl || !docEl) return;
+    const children = docEl.children;
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const scrollTop = scrollEl.scrollTop;
+    const next = new Array(children.length);
+    for (let i = 0; i < children.length; i++) {
+      const r = children[i].getBoundingClientRect();
+      next[i] = { top: r.top - scrollRect.top + scrollTop, height: r.height };
+    }
+    offsetsRef.current = next;
+  }, []);
+
+  /* ---------------------------------- */
+  /* Scroll handling                    */
+  /* ---------------------------------- */
+
+  const scheduleScrollWork = useCallback(() => {
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      updateCurrentPage();
+      managePages();
+    });
+  }, [updateCurrentPage, managePages]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || status !== "ready") return undefined;
+    el.addEventListener("scroll", scheduleScrollWork, { passive: true });
+    return () => el.removeEventListener("scroll", scheduleScrollWork);
+  }, [status, scheduleScrollWork]);
+
+  /* Layout measurement + scroll anchoring whenever the scale changes. */
+  useLayoutEffect(() => {
+    if (status !== "ready" || !dims || !availableWidth) return;
+    measureOffsets();
+    const anchor = anchorRef.current;
+    anchorRef.current = null;
+    const el = scrollRef.current;
+    if (anchor && el) {
+      const p = offsetsRef.current[anchor.i];
+      if (p) el.scrollTop = p.top + anchor.ratio * p.height;
+    }
+    updateCurrentPage();
+    managePages();
+  }, [status, dims, availableWidth, scale, measureOffsets, managePages, updateCurrentPage]);
+
+  /* ---------------------------------- */
+  /* Zoom & navigation controls         */
+  /* ---------------------------------- */
+
+  const captureAnchor = useCallback(() => {
+    const el = scrollRef.current;
+    const offs = offsetsRef.current;
+    if (!el || !offs.length) return null;
+    const top = el.scrollTop;
+    let idx = 0;
+    for (let i = 0; i < offs.length; i++) {
+      if (offs[i] && offs[i].top <= top + 1) idx = i;
+      else break;
+    }
+    const p = offs[idx];
+    const ratio =
+      p && p.height > 0 ? clamp((top - p.top) / p.height, 0, 1) : 0;
+    return { i: idx, ratio };
+  }, []);
+
+  const changeZoom = useCallback(
+    (factor) => {
+      const fit = fitScaleRef.current || 1;
+      const next = clamp(scaleRef.current * factor, MIN_SCALE, MAX_SCALE);
+      anchorRef.current = captureAnchor();
+      setZoom(next / fit);
+      setJumpOpen(false);
+    },
+    [captureAnchor]
+  );
+
+  const resetZoom = useCallback(() => {
+    anchorRef.current = captureAnchor();
+    setZoom(1);
+    setJumpOpen(false);
+  }, [captureAnchor]);
+
+  const jumpToPage = useCallback(
+    (n) => {
+      const el = scrollRef.current;
+      const offs = offsetsRef.current;
+      if (!el || !offs.length || !Number.isFinite(n)) return;
+      const p = offs[clamp(Math.round(n), 1, totalPages) - 1];
+      if (!p) return;
+      el.scrollTo({ top: p.top, behavior: "smooth" });
+    },
+    [totalPages]
+  );
+
+  const handleClose = useCallback(() => navigate(-1), [navigate]);
+
+  /* ---------------------------------- */
+  /* Fullscreen (optional)              */
+  /* ---------------------------------- */
+
+  const fullscreenSupported =
+    typeof document !== "undefined" &&
+    !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+
+  useEffect(() => {
+    if (!fullscreenSupported) return undefined;
+    const onChange = () =>
+      setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    document.addEventListener("webkitfullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("webkitfullscreenchange", onChange);
+    };
+  }, [fullscreenSupported]);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      void (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
+    } else {
+      void (el.requestFullscreen?.() || el.webkitRequestFullscreen?.());
+    }
+  }, []);
+
+  /* ---------------------------------- */
+  /* Tab visibility guard (unchanged)   */
+  /* ---------------------------------- */
 
   useEffect(() => {
     const handleVisibility = () => setHidden(document.hidden);
@@ -64,198 +464,158 @@ export default function PdfViewerPage() {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
-  useEffect(() => {
-    if (!ready || !pdfDocRef.current || currentPage < 1) return;
-    renderPage(currentPage);
-  }, [currentPage, scale, ready]);
+  /* ---------------------------------- */
+  /* Rendered page list                 */
+  /* ---------------------------------- */
 
-  const renderPage = async (pageNum) => {
-    if (!pdfDocRef.current) return;
-    if (renderTaskRef.current) {
-      renderTaskRef.current.cancel();
-      renderTaskRef.current = null;
-    }
-    setRendering(true);
-    try {
-      const page = await pdfDocRef.current.getPage(pageNum);
-      const dpr = window.devicePixelRatio || 1;
-      const viewport = page.getViewport({ scale: scale * dpr });
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      canvas.style.width = `${viewport.width / dpr}px`;
-      canvas.style.height = `${viewport.height / dpr}px`;
-      const task = page.render({ canvasContext: ctx, viewport });
-      renderTaskRef.current = task;
-      await task.promise;
-
-      ctx.save();
-      ctx.globalAlpha = 0.18;
-      ctx.fillStyle = "#4f46e5";
-      ctx.font = `bold ${Math.max(11, viewport.width / 28)}px Inter, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.fillText(userEmail, viewport.width / 2, Math.max(11, viewport.width / 28) + 10);
-      ctx.fillText(userEmail, viewport.width / 2, viewport.height - 18);
-      ctx.restore();
-    } catch (e) {
-      if (e?.name !== "RenderingCancelledException") console.error(e);
-    } finally {
-      setRendering(false);
-    }
-  };
-
-  const handleTouchStart = (e) => {
-    touchStartX.current = e.touches[0].clientX;
-  };
-
-  const handleTouchEnd = (e) => {
-    if (touchStartX.current === null) return;
-    const diff = touchStartX.current - e.changedTouches[0].clientX;
-    if (Math.abs(diff) > 50) {
-      if (diff > 0) setCurrentPage((p) => Math.min(totalPages, p + 1));
-      else setCurrentPage((p) => Math.max(1, p - 1));
-    }
-    touchStartX.current = null;
-  };
-
-  const handleClose = () => {
-    navigate(-1);
-  };
-
-  if (!ready) return <DotsLoader />;
-
-  return (
-    <div style={{
-      width: "100vw", height: "100dvh", background: "#1e1e2e",
-      display: "flex", flexDirection: "column", overflow: "hidden",
-      userSelect: "none", WebkitUserSelect: "none",
-    }}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      <style>{`
-        @keyframes dotBounce {
-          0%, 100% { transform: translateY(0); opacity: 0.35; }
-          50% { transform: translateY(-10px); opacity: 1; }
-        }
-        * { -webkit-touch-callout: none; }
-      `}</style>
-
-      {hidden && (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 50, background: "rgba(15,23,42,0.97)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          flexDirection: "column", gap: 12,
-        }}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
-          </svg>
-          <p style={{ color: "white", fontWeight: 700, fontSize: "0.95rem", margin: 0 }}>Content hidden while tab is inactive</p>
-        </div>
-      )}
-
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "10px 14px", background: "#0f172a", flexWrap: "wrap", gap: 8, flexShrink: 0,
-      }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1 || rendering}
-            style={{ padding: "6px 12px", borderRadius: 8, border: "none", background: "#1e293b", color: "white", cursor: "pointer", fontSize: "0.85rem" }}>
-            ‹ Prev
-          </button>
-          <span style={{ color: "white", fontSize: "0.85rem", fontWeight: 600 }}>{currentPage} / {totalPages}</span>
-          <button onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages || rendering}
-            style={{ padding: "6px 12px", borderRadius: 8, border: "none", background: "#1e293b", color: "white", cursor: "pointer", fontSize: "0.85rem" }}>
-            Next ›
-          </button>
-        </div>
-
-        <span style={{ color: "#94a3b8", fontSize: "0.8rem", fontWeight: 600, flex: 1, textAlign: "center", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "0 8px" }}>
-          {pdfTitle}
-        </span>
-
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button onClick={() => setScale((s) => Math.max(0.5, s - 0.2))}
-            style={{ padding: "6px 10px", borderRadius: 8, border: "none", background: "#1e293b", color: "white", cursor: "pointer" }}>−</button>
-          <span style={{ color: "white", fontSize: "0.8rem" }}>{Math.round(scale * 100)}%</span>
-          <button onClick={() => setScale((s) => Math.min(3, s + 0.2))}
-            style={{ padding: "6px 10px", borderRadius: 8, border: "none", background: "#1e293b", color: "white", cursor: "pointer" }}>+</button>
-          <button onClick={handleClose}
-            style={{ padding: "6px 12px", borderRadius: 8, border: "none", background: "#dc2626", color: "white", cursor: "pointer", fontSize: "0.8rem" }}>
-            Close
-          </button>
-        </div>
-      </div>
-
+  const docElement = useMemo(() => {
+    if (!dims || !availableWidth || !scale) return null;
+    const maxW = dims.reduce((m, d) => Math.max(m, d.w), 0);
+    return (
       <div
-        style={{
-          flex: 1, overflowY: "auto", overflowX: "auto",
-          display: "flex", justifyContent: "center", alignItems: "flex-start",
-          padding: "1rem", touchAction: "pan-x pan-y",
-          WebkitOverflowScrolling: "touch",
-          position: "relative",
-        }}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
+        className="pv-doc"
+        ref={pagesElRef}
+        style={{ width: maxW * scale }}
         onContextMenu={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}
       >
-        <button
-          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-          disabled={currentPage <= 1 || rendering}
-          style={{
-            position: "fixed", left: "clamp(6px, 2vw, 16px)", top: "50%", transform: "translateY(-50%)",
-            zIndex: 20,
-            width: "clamp(36px, 5vw, 48px)", height: "clamp(36px, 5vw, 48px)",
-            borderRadius: "50%",
-            border: "1px solid rgba(255,255,255,0.15)",
-            background: "rgba(15,23,42,0.7)",
-            color: "white", fontSize: "clamp(1rem, 2.5vw, 1.4rem)",
-            cursor: currentPage <= 1 ? "not-allowed" : "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            backdropFilter: "blur(8px)",
-            WebkitBackdropFilter: "blur(8px)",
-            opacity: currentPage <= 1 ? 0.25 : 1,
-            transition: "opacity 0.2s ease, transform 0.15s ease",
-            boxShadow: "0 2px 12px rgba(0,0,0,0.4)",
-          }}
-        >
-          ‹
-        </button>
-
-        <canvas
-          ref={canvasRef}
-          style={{
-            display: "block", maxWidth: "100%",
-            userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none",
-            pointerEvents: "none",
-          }}
-        />
-
-        <button
-          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-          disabled={currentPage >= totalPages || rendering}
-          style={{
-            position: "fixed", right: "clamp(6px, 2vw, 16px)", top: "50%", transform: "translateY(-50%)",
-            zIndex: 20,
-            width: "clamp(36px, 5vw, 48px)", height: "clamp(36px, 5vw, 48px)",
-            borderRadius: "50%",
-            border: "1px solid rgba(255,255,255,0.15)",
-            background: "rgba(15,23,42,0.7)",
-            color: "white", fontSize: "clamp(1rem, 2.5vw, 1.4rem)",
-            cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            backdropFilter: "blur(8px)",
-            WebkitBackdropFilter: "blur(8px)",
-            opacity: currentPage >= totalPages ? 0.25 : 1,
-            transition: "opacity 0.2s ease, transform 0.15s ease",
-            boxShadow: "0 2px 12px rgba(0,0,0,0.4)",
-          }}
-        >
-          ›
-        </button>
+        {dims.map((d, i) => (
+          <div
+            key={i}
+            className="pv-page"
+            data-page={i}
+            style={{ width: d.w * scale, height: d.h * scale }}
+          >
+            <canvas />
+            <div className="pv-page-ph" aria-hidden="true" />
+          </div>
+        ))}
       </div>
+    );
+  }, [dims, availableWidth, scale]);
+
+  /* ---------------------------------- */
+  /* Screens                            */
+  /* ---------------------------------- */
+
+  if (status === "error") {
+    return (
+      <div className="pv-root" onContextMenu={(e) => e.preventDefault()}>
+        <div className="pv-center-state">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+          </svg>
+          <p>Unable to open this PDF.</p>
+          <p className="pv-center-sub">The document could not be loaded. Please go back and try again.</p>
+          <button className="pv-back-btn" onClick={handleClose}>Go Back</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="pv-root"
+      ref={rootRef}
+      onContextMenu={(e) => e.preventDefault()}
+      onDragStart={(e) => e.preventDefault()}
+    >
+      {hidden && (
+        <div className="pv-hidden-overlay">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <p>Content hidden while tab is inactive</p>
+        </div>
+      )}
+
+      <header className="pv-toolbar">
+        <button className="pv-btn" onClick={handleClose} aria-label="Close viewer" title="Close">
+          <CloseIcon />
+        </button>
+
+        <span className="pv-title" title={pdfTitle}>
+          {pdfTitle}
+        </span>
+
+        <div className="pv-controls">
+          {jumpOpen ? (
+            <input
+              className="pv-jump-input"
+              autoFocus
+              inputMode="numeric"
+              value={jumpValue}
+              aria-label="Go to page"
+              onChange={(e) => setJumpValue(e.target.value.replace(/[^0-9]/g, ""))}
+              onBlur={() => setJumpOpen(false)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  jumpToPage(parseInt(jumpValue, 10));
+                  setJumpOpen(false);
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  setJumpOpen(false);
+                }
+              }}
+            />
+          ) : (
+            <button
+              className="pv-page-indicator"
+              onClick={() => {
+                setJumpValue(String(currentPage));
+                setJumpOpen(true);
+              }}
+              title="Jump to page"
+            >
+              {currentPage} / {totalPages}
+            </button>
+          )}
+
+          <button
+            className="pv-btn"
+            onClick={() => changeZoom(1 / ZOOM_STEP)}
+            aria-label="Zoom out"
+            title="Zoom out"
+          >
+            −
+          </button>
+          <span className="pv-zoom-value">{Math.round(scale * 100)}%</span>
+          <button
+            className="pv-btn"
+            onClick={() => changeZoom(ZOOM_STEP)}
+            aria-label="Zoom in"
+            title="Zoom in"
+          >
+            +
+          </button>
+          <button
+            className={`pv-btn${zoom === 1 ? " pv-btn-active" : ""}`}
+            onClick={resetZoom}
+            aria-label="Fit to width"
+            title="Fit to width"
+          >
+            <FitWidthIcon />
+          </button>
+          {fullscreenSupported && (
+            <button
+              className={`pv-btn${isFullscreen ? " pv-btn-active" : ""}`}
+              onClick={toggleFullscreen}
+              aria-label="Toggle fullscreen"
+              title="Fullscreen"
+            >
+              <FullscreenIcon />
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className="pv-scroll" ref={scrollRef} onScroll={scheduleScrollWork}>
+        {docElement}
+      </div>
+
+      {!docElement && <DotsLoader />}
     </div>
   );
 }

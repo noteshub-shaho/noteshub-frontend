@@ -1,0 +1,318 @@
+/* Scoped styles for the paid-notes PDF viewer (/pdf-viewer). */
+
+.pv-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #1e1e2e;
+  overflow: hidden;
+  font-family: 'Inter', system-ui, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* ---------- Toolbar ---------- */
+
+.pv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 52px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  background: #0f172a;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  z-index: 10;
+}
+
+.pv-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #cbd5e1;
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+.pv-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.pv-btn {
+  min-width: 40px;
+  height: 40px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+.pv-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pv-btn:active {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.pv-btn.pv-btn-active {
+  background: rgba(99, 102, 241, 0.28);
+  color: #c7d2fe;
+}
+
+.pv-page-indicator {
+  border: none;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.pv-page-indicator:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pv-jump-input {
+  width: 48px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid #6366f1;
+  background: #0f172a;
+  color: #ffffff;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  outline: none;
+  padding: 0 4px;
+}
+
+.pv-zoom-value {
+  color: #94a3b8;
+  font-size: 0.75rem;
+  font-weight: 600;
+  min-width: 40px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 430px) {
+  .pv-zoom-value {
+    display: none;
+  }
+}
+
+/* ---------- Document scroll area ---------- */
+
+.pv-scroll {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 12px;
+}
+
+@media (min-width: 640px) {
+  .pv-scroll {
+    padding: 0 16px;
+  }
+}
+
+.pv-doc {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin: 0 auto;
+  padding: 14px 0 28px;
+}
+
+@media (min-width: 640px) {
+  .pv-doc {
+    gap: 18px;
+    padding: 18px 0 32px;
+  }
+}
+
+.pv-page {
+  position: relative;
+  flex-shrink: 0;
+  background: #ffffff;
+  overflow: hidden;
+  border-radius: 2px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+
+.pv-page > canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pv-page-ph {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, #eef1f7 0%, #f8fafc 45%, #eef1f7 90%);
+  background-size: 220% 100%;
+  animation: pvShimmer 1.4s linear infinite;
+  transition: opacity 0.2s ease;
+}
+
+.pv-page.pv-rendered .pv-page-ph {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pv-page.pv-error .pv-page-ph {
+  animation: none;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pv-page.pv-error .pv-page-ph::after {
+  content: "Failed to render page";
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+@keyframes pvShimmer {
+  0% {
+    background-position: 220% 0;
+  }
+  100% {
+    background-position: -220% 0;
+  }
+}
+
+/* ---------- Loading / error / hidden states ---------- */
+
+.pv-loader-wrap,
+.pv-center-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: #1e1e2e;
+  z-index: 30;
+}
+
+.pv-loader-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #4f46e5;
+  margin: 0;
+}
+
+.pv-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.pv-dots .pv-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4f46e5;
+  display: inline-block;
+  animation: pvDotBounce 0.6s ease-in-out infinite;
+}
+
+.pv-dots .pv-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.pv-dots .pv-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes pvDotBounce {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  50% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
+}
+
+.pv-center-state p {
+  color: #e2e8f0;
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin: 0;
+  text-align: center;
+  padding: 0 24px;
+}
+
+.pv-center-sub {
+  color: #94a3b8 !important;
+  font-weight: 500 !important;
+  font-size: 0.8rem !important;
+}
+
+.pv-back-btn {
+  margin-top: 4px;
+  background: #4f46e5;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 22px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pv-back-btn:hover {
+  background: #4338ca;
+}
+
+.pv-hidden-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.97);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pv-hidden-overlay p {
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin: 0;
+}

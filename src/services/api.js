@@ -95,10 +95,10 @@ export const api = {
     },
     recovery: {
       eligibility: (noteKey) => client.get(`/api/paid-notes/recovery/eligibility/${noteKey}`),
-      createRequest: (noteKey, description, fingerprints) =>
+      createRequest: (noteKey, description, fingerprints, deviceHints) =>
         client.post(
           "/api/paid-notes/recovery/request",
-          { noteKey, description },
+          { noteKey, description, deviceHints },
           { headers: buildDeviceHeaders(null, fingerprints) }
         ),
     },

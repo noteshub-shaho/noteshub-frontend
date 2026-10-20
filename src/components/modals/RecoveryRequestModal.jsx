@@ -40,6 +40,21 @@ const StatusPill = ({ status }) => {
   );
 };
 
+const collectDeviceHints = async () => {
+  try {
+    const hints = navigator.userAgentData;
+    if (!hints || typeof hints.getHighEntropyValues !== "function") return null;
+    const values = await hints.getHighEntropyValues(["platform", "platformVersion", "model"]);
+    return {
+      platform: values.platform || null,
+      platformVersion: values.platformVersion || null,
+      model: values.model || null,
+    };
+  } catch {
+    return null;
+  }
+};
+
 export default function RecoveryRequestModal({ noteKey, noteTitle, purchaseDate, fingerprints, onClose, onSubmitted }) {
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -57,7 +72,8 @@ export default function RecoveryRequestModal({ noteKey, noteTitle, purchaseDate,
     setSubmitting(true);
     setError(null);
     try {
-      const res = await api.paidNotes.recovery.createRequest(noteKey, value, fingerprints);
+      const deviceHints = await collectDeviceHints();
+      const res = await api.paidNotes.recovery.createRequest(noteKey, value, fingerprints, deviceHints);
       setSubmitted(res.data.request);
       if (onSubmitted) onSubmitted(res.data.request);
     } catch (err) {

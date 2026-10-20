@@ -3,23 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../../context/AuthContext";
 import DonateModal from "../../components/modals/DonateModal";
+import { isProtectedFile, isProtectedFolder } from "../../utils/protectedContent";
 import "./app.css";
-const PROTECTED_KEYWORDS = [
-  "important-answers",
-  "important-questions",
-  "important answers",
-  "important questions",
-  "answers",
-  "internal-assessments",
-  "manual",
-  "lab-experiment",
-  "lab-experiments"
-];
-
-const isProtectedFile = (fileName) => {
-  const lower = fileName.toLowerCase(); 
-  return PROTECTED_KEYWORDS.some((kw) => lower.includes(kw));
-};
 
 
 const DotsLoader = () => (
@@ -298,14 +283,7 @@ const handleBack = () => {
     }
   };
 
-const LAB_SUBJECTS_SEM4 = ["dbms-lab", "os-lab", "web-tech-lab"];
-const LAB_SUBJECTS_SEM5 = ["aisc-lab", "se-lab", "dwm-lab", "cn-lab", "wml-lab"];
-const folderName = subSubject || subject;
-const isLabSubject =
-  (subject === "lab-experiments" && LAB_SUBJECTS_SEM4.includes((subSubject || "").toLowerCase())) ||
-  (subject === "lab-experiment" && LAB_SUBJECTS_SEM5.includes((subSubject || "").toLowerCase()));
-const isLabFolder = ["lab-experiments", "lab-experiment"].includes(subject) && !subSubject;
-const isFolderProtected = isProtectedFile(folderName) || isLabSubject || isLabFolder;
+const isFolderProtected = isProtectedFolder(subject, subSubject);
 
   
   const folderGate = isFolderProtected && !isAuthenticated;

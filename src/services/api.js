@@ -12,6 +12,20 @@ client.interceptors.request.use((config) => {
   return config;
 });
 
+// Device credentials for paid-notes endpoints. `fingerprints` holds the
+// stable v2 fingerprint plus the legacy (pre-v2) one, which the backend
+// compares against the value frozen at purchase time. Undefined values are
+// omitted so the browser never sends empty headers.
+const buildDeviceHeaders = (deviceToken, fingerprints = {}) => {
+  const headers = {};
+  if (deviceToken) headers["x-device-token"] = deviceToken;
+  if (fingerprints?.fingerprint) headers["x-device-fingerprint"] = fingerprints.fingerprint;
+  if (fingerprints?.legacyFingerprint) {
+    headers["x-device-fingerprint-legacy"] = fingerprints.legacyFingerprint;
+  }
+  return headers;
+};
+
 export const api = {
   auth: {
     login: (data) => client.post("/api/auth/login", data),
@@ -52,31 +66,22 @@ export const api = {
     getConfig: (noteKey) => client.get(`/api/paid-notes/config/${noteKey}`),
     getFileList: (noteKey) => client.get(`/api/paid-notes/files/${noteKey}`),
     createOrder: (noteKey) => client.post("/api/paid-notes/purchase/create-order", { noteKey }),
-    verifyPurchase: (data, deviceFingerprint) =>
+    verifyPurchase: (data, fingerprints) =>
       client.post("/api/paid-notes/purchase/verify", data, {
-        headers: { "x-device-fingerprint": deviceFingerprint },
+        headers: buildDeviceHeaders(null, fingerprints),
       }),
-    checkEntitlement: (noteKey, deviceToken, deviceFingerprint) =>
+    checkEntitlement: (noteKey, deviceToken, fingerprints) =>
       client.get(`/api/paid-notes/entitlement/${noteKey}`, {
-        headers: {
-          "x-device-token": deviceToken,
-          "x-device-fingerprint": deviceFingerprint,
-        },
+        headers: buildDeviceHeaders(deviceToken, fingerprints),
       }),
-    streamFile: (noteKey, fileName, deviceToken, deviceFingerprint) =>
+    streamFile: (noteKey, fileName, deviceToken, fingerprints) =>
       client.get(`/api/paid-notes/stream/${noteKey}/file/${encodeURIComponent(fileName)}`, {
-        headers: {
-          "x-device-token": deviceToken,
-          "x-device-fingerprint": deviceFingerprint,
-        },
+        headers: buildDeviceHeaders(deviceToken, fingerprints),
         responseType: "arraybuffer",
       }),
-    getSignedAccess: (noteKey, deviceToken, deviceFingerprint) =>
+    getSignedAccess: (noteKey, deviceToken, fingerprints) =>
       client.get(`/api/paid-notes/access/${noteKey}`, {
-        headers: {
-          "x-device-token": deviceToken,
-          "x-device-fingerprint": deviceFingerprint,
-        },
+        headers: buildDeviceHeaders(deviceToken, fingerprints),
       }),
     admin: {
       list: () => client.get("/api/paid-notes/admin/list"),

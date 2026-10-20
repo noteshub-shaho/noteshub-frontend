@@ -8,7 +8,7 @@ const LockIcon = () => (
   </svg>
 );
 
-export default function PurchaseModal({ noteKey, noteTitle, deviceFingerprint, onClose, onSuccess }) {
+export default function PurchaseModal({ noteKey, noteTitle, fingerprints, onClose, onSuccess }) {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
@@ -42,9 +42,11 @@ export default function PurchaseModal({ noteKey, noteTitle, deviceFingerprint, o
                 razorpay_order_id: response.razorpay_order_id,
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_signature: response.razorpay_signature,
-                deviceFingerprint,
+                // The stable v2 fingerprint is frozen as this purchase's
+                // device identity; it does not change with browser layout.
+                deviceFingerprint: fingerprints.fingerprint,
               },
-              deviceFingerprint
+              fingerprints
             );
             if (verifyRes.data?.deviceToken) {
               localStorage.setItem(`device_token_${noteKey}`, verifyRes.data.deviceToken);

@@ -1,8 +1,8 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../services/api";
-import { getDeviceFingerprint } from "../../utils/fingerprint";
+import { getDeviceFingerprints } from "../../utils/fingerprint";
 import PurchaseModal from "../../components/modals/PurchaseModal";
 import { pdfStore } from "../../utils/pdfStore";
 
@@ -45,7 +45,7 @@ export default function PaidNoteViewer() {
   const [notePrice, setNotePrice] = useState(null);
   const [fileList, setFileList] = useState([]);
   const [entitlementStatus, setEntitlementStatus] = useState("unknown");
-  const [fingerprint, setFingerprint] = useState(null);
+  const [fingerprints, setFingerprints] = useState(null);
   const [deviceToken, setDeviceToken] = useState(null);
   const [purchaseTarget, setPurchaseTarget] = useState(null);
   const [openingFile, setOpeningFile] = useState(null);
@@ -57,7 +57,7 @@ export default function PaidNoteViewer() {
   }, [isAuthenticated, navigate]);
 
   useEffect(() => {
-    getDeviceFingerprint().then(setFingerprint);
+    getDeviceFingerprints().then(setFingerprints);
     const stored = localStorage.getItem(`device_token_${noteKey}`);
     if (stored) setDeviceToken(stored);
   }, [noteKey]);
@@ -74,8 +74,8 @@ export default function PaidNoteViewer() {
   }, [noteKey]);
 
   useEffect(() => {
-    if (!fingerprint || !isAuthenticated) return;
-    api.paidNotes.checkEntitlement(noteKey, deviceToken, fingerprint)
+    if (!fingerprints || !isAuthenticated) return;
+    api.paidNotes.checkEntitlement(noteKey, deviceToken, fingerprints)
       .then((res) => {
         if (res.data?.deviceToken) {
           localStorage.setItem(`device_token_${noteKey}`, res.data.deviceToken);
@@ -91,7 +91,7 @@ export default function PaidNoteViewer() {
           setEntitlementStatus("not-purchased");
         }
       });
-  }, [fingerprint, isAuthenticated, noteKey, deviceToken]);
+  }, [fingerprints, isAuthenticated, noteKey, deviceToken]);
 
 
   const handleOpen = async (file) => {
@@ -101,7 +101,7 @@ export default function PaidNoteViewer() {
     const currentDeviceToken = localStorage.getItem(`device_token_${noteKey}`);
     setOpeningFile(file.name);
     try {
-      const res = await api.paidNotes.streamFile(noteKey, file.name, currentDeviceToken, fingerprint);
+      const res = await api.paidNotes.streamFile(noteKey, file.name, currentDeviceToken, fingerprints);
       const arrayBuffer = res.data;
       const uint8 = new Uint8Array(arrayBuffer);
       pdfStore.set(
@@ -198,11 +198,11 @@ export default function PaidNoteViewer() {
 
       </main>
 
-      {purchaseTarget !== null && fingerprint && (
+      {purchaseTarget !== null && fingerprints && (
         <PurchaseModal
           noteKey={noteKey}
           noteTitle={noteTitle}
-          deviceFingerprint={fingerprint}
+          fingerprints={fingerprints}
           onClose={() => setPurchaseTarget(null)}
           onSuccess={() => {
             const stored = localStorage.getItem(`device_token_${noteKey}`);

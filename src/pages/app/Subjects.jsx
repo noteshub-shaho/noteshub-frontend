@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
+import { useAuth } from "../../context/AuthContext";
+import { isProtectedFolder } from "../../utils/protectedContent";
 import "./app.css";
+
+// Upper bound for the paid-notes config lookup so a slow or cold-starting
+// backend can never leave the user staring at an unresponsive button.
+const CONFIG_FETCH_TIMEOUT_MS = 8000;
 
 const BackIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -13,10 +19,14 @@ const Subjects = () => {
   const { university, semester } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  // AuthContext resolves synchronously from localStorage, so this value is
+  // already accurate when a button is clicked — no network request needed.
+  const { isAuthenticated } = useAuth();
 
   const [activeParent, setActiveParent] = useState(
     location.state?.activeParent || null
   );
+  const [checkingKey, setCheckingKey] = useState(null);
 
   const subjectsData = {
     mu: {
@@ -46,22 +56,7 @@ const Subjects = () => {
   const pageDesc = `Browse all ${semLabel} subjects for ${uniName} on NotesHub. Free engineering notes, assignments, and study material for every subject.`;
   const canonicalUrl = `${import.meta.env.VITE_FRONTEND_URL}/subjects/${university}/${semester}`;
 
-  const checkAndNavigate = async (subject, subSubject = null) => {
-    const noteKey = subSubject
-      ? `${university}/${semester}/${subject}/${subSubject}`
-      : `${university}/${semester}/${subject}`;
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/paid-notes/config/${noteKey}`);
-      const data = await res.json();
-      if (data.success && data.isEnabled) {
-        if (subSubject) {
-          navigate(`/paid-notes/${university}/${semester}/${subject}/${subSubject}`);
-        } else {
-          navigate(`/paid-notes/${university}/${semester}/${subject}`);
-        }
-        return;
-      }
-    } catch {}
+  const navigateToNotes = (subject, subSubject = null) => {
     if (subSubject) {
       navigate(`/notes/${university}/${semester}/${subject}/${subSubject}`, {
         state: { university, semester, activeParent: subject },
@@ -71,6 +66,46 @@ const Subjects = () => {
         state: { university, semester },
       });
     }
+  };
+
+  const checkAndNavigate = async (subject, subSubject = null) => {
+    // A logged-out user can never open a protected folder: Files.jsx answers
+    // it instantly with its "Login Required" screen and makes no network
+    // requests. Skip the paid-notes config round-trip entirely so the login
+    // prompt appears immediately instead of after a slow backend response.
+    if (!isAuthenticated && isProtectedFolder(subject, subSubject)) {
+      navigateToNotes(subject, subSubject);
+      return;
+    }
+
+    const noteKey = subSubject
+      ? `${university}/${semester}/${subject}/${subSubject}`
+      : `${university}/${semester}/${subject}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), CONFIG_FETCH_TIMEOUT_MS);
+    setCheckingKey(noteKey);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/paid-notes/config/${noteKey}`, {
+        signal: controller.signal,
+      });
+      const data = await res.json();
+      if (data.success && data.isEnabled) {
+        if (subSubject) {
+          navigate(`/paid-notes/${university}/${semester}/${subject}/${subSubject}`);
+        } else {
+          navigate(`/paid-notes/${university}/${semester}/${subject}`);
+        }
+        return;
+      }
+    } catch {
+      // Network failure or timeout falls through to the free notes page,
+      // matching the previous behaviour for failed config lookups.
+    } finally {
+      clearTimeout(timeoutId);
+      setCheckingKey(null);
+    }
+    navigateToNotes(subject, subSubject);
   };
 
   const handleSubjectClick = (subject) => {
@@ -131,9 +166,13 @@ const Subjects = () => {
               )}
               <button
                 onClick={() => activeParent ? handleSubClick(item) : handleSubjectClick(item)}
+                disabled={!!checkingKey}
                 className={`notes-btn ${isMu ? "mu" : "msbte"}`}
+                style={checkingKey ? { opacity: 0.7, cursor: "not-allowed" } : undefined}
               >
-                {nestedSubjects[item] && !activeParent ? "View →" : "Open →"}
+                {checkingKey
+                  ? "Checking..."
+                  : nestedSubjects[item] && !activeParent ? "View →" : "Open →"}
               </button>
             </div>
           ))}

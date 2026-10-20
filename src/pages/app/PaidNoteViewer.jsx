@@ -4,6 +4,7 @@ import { useAuth } from "../../context/AuthContext";
 import { api } from "../../services/api";
 import { getDeviceFingerprints } from "../../utils/fingerprint";
 import PurchaseModal from "../../components/modals/PurchaseModal";
+import RecoveryRequestModal from "../../components/modals/RecoveryRequestModal";
 import { pdfStore } from "../../utils/pdfStore";
 
 import "./app.css";
@@ -30,6 +31,32 @@ const LockIcon = () => (
   </svg>
 );
 
+const formatDateShort = (value) => {
+  if (!value) return "Not available";
+  try {
+    return new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  } catch {
+    return "Not available";
+  }
+};
+
+const RecoveryStatusPill = ({ status }) => {
+  const styles = {
+    PENDING: { background: "#fffbeb", color: "#d97706" },
+    APPROVED: { background: "#f0fdf4", color: "#16a34a" },
+    REJECTED: { background: "#fef2f2", color: "#dc2626" },
+  };
+  const label = status === "PENDING" ? "Pending" : status === "APPROVED" ? "Approved" : "Rejected";
+  return (
+    <span style={{
+      display: "inline-block", padding: "2px 10px", borderRadius: "999px",
+      fontSize: "0.72rem", fontWeight: 700, ...(styles[status] || styles.PENDING),
+    }}>
+      {label}
+    </span>
+  );
+};
+
 
 export default function PaidNoteViewer() {
   const { university, semester, subject, subSubject } = useParams();
@@ -49,6 +76,8 @@ export default function PaidNoteViewer() {
   const [deviceToken, setDeviceToken] = useState(null);
   const [purchaseTarget, setPurchaseTarget] = useState(null);
   const [openingFile, setOpeningFile] = useState(null);
+  const [recoveryInfo, setRecoveryInfo] = useState(null);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -92,6 +121,51 @@ export default function PaidNoteViewer() {
         }
       });
   }, [fingerprints, isAuthenticated, noteKey, deviceToken]);
+
+  useEffect(() => {
+    if (entitlementStatus !== "device-blocked" || !isAuthenticated) return;
+
+    let cancelled = false;
+    const loadRecovery = () => {
+      api.paidNotes.recovery
+        .eligibility(noteKey)
+        .then((res) => {
+          if (!cancelled) setRecoveryInfo(res.data);
+        })
+        .catch(() => {});
+    };
+
+    loadRecovery();
+    const interval = setInterval(loadRecovery, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [entitlementStatus, isAuthenticated, noteKey]);
+
+  useEffect(() => {
+    if (entitlementStatus !== "device-blocked" || !fingerprints) return;
+    if (recoveryInfo?.activeRequest?.status !== "APPROVED") return;
+
+    let cancelled = false;
+    const storedToken = localStorage.getItem(`device_token_${noteKey}`) || undefined;
+
+    api.paidNotes
+      .checkEntitlement(noteKey, storedToken, fingerprints)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.data?.deviceToken) {
+          localStorage.setItem(`device_token_${noteKey}`, res.data.deviceToken);
+          setDeviceToken(res.data.deviceToken);
+        }
+        setEntitlementStatus("authorized");
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [recoveryInfo, entitlementStatus, fingerprints, noteKey]);
 
 
   const handleOpen = async (file) => {
@@ -148,6 +222,42 @@ export default function PaidNoteViewer() {
               This note was purchased on a different device. Access is restricted to your registered device only.
               Contact support to change your registered device.
             </p>
+
+            {recoveryInfo?.activeRequest && (
+              <div style={{ marginTop: "0.85rem", display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
+                <RecoveryStatusPill status={recoveryInfo.activeRequest.status} />
+                {recoveryInfo.activeRequest.status === "PENDING" && (
+                  <p style={{ color: "#64748b", fontSize: "0.82rem", textAlign: "center", margin: 0, lineHeight: 1.6 }}>
+                    Recovery request submitted on {formatDateShort(recoveryInfo.activeRequest.createdAt)}.
+                    An admin is reviewing it — this page updates automatically.
+                  </p>
+                )}
+                {recoveryInfo.activeRequest.status === "APPROVED" && (
+                  <p style={{ color: "#16a34a", fontSize: "0.82rem", textAlign: "center", margin: 0, lineHeight: 1.6 }}>
+                    Your request was approved. Restoring access to this device...
+                  </p>
+                )}
+                {recoveryInfo.activeRequest.status === "REJECTED" && (
+                  <p style={{ color: "#dc2626", fontSize: "0.82rem", textAlign: "center", margin: 0, lineHeight: 1.6 }}>
+                    Your recovery request was rejected:{" "}
+                    {recoveryInfo.activeRequest.rejectionReason || "No reason provided."}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {recoveryInfo?.eligible &&
+              (!recoveryInfo.activeRequest || recoveryInfo.activeRequest.status === "REJECTED") && (
+                <div style={{ marginTop: "0.9rem", textAlign: "center" }}>
+                  <button
+                    className="notes-btn mu"
+                    style={{ marginTop: 0 }}
+                    onClick={() => setShowRecoveryModal(true)}
+                  >
+                    Contact Admin
+                  </button>
+                </div>
+              )}
           </div>
         )}
 
@@ -209,6 +319,22 @@ export default function PaidNoteViewer() {
             if (stored) setDeviceToken(stored);
             setPurchaseTarget(null);
             setEntitlementStatus("authorized");
+          }}
+        />
+      )}
+
+      {showRecoveryModal && fingerprints && (
+        <RecoveryRequestModal
+          noteKey={noteKey}
+          noteTitle={noteTitle}
+          purchaseDate={recoveryInfo?.purchase?.createdAt || null}
+          fingerprints={fingerprints}
+          onClose={() => setShowRecoveryModal(false)}
+          onSubmitted={() => {
+            api.paidNotes.recovery
+              .eligibility(noteKey)
+              .then((res) => setRecoveryInfo(res.data))
+              .catch(() => {});
           }}
         />
       )}

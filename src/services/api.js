@@ -93,6 +93,15 @@ export const api = {
       resetDevice: (userId, noteKey) =>
         client.post("/api/paid-notes/admin/reset-device", { userId, noteKey }),
     },
+    recovery: {
+      eligibility: (noteKey) => client.get(`/api/paid-notes/recovery/eligibility/${noteKey}`),
+      createRequest: (noteKey, description, fingerprints) =>
+        client.post(
+          "/api/paid-notes/recovery/request",
+          { noteKey, description },
+          { headers: buildDeviceHeaders(null, fingerprints) }
+        ),
+    },
   },
 
   admin: {

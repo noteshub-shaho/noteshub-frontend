@@ -373,9 +373,80 @@ export default function PdfViewerPage() {
     managePages();
   }, [status, dims, availableWidth, scale, measureOffsets, managePages, updateCurrentPage]);
 
-  /* ---------------------------------- */
-  /* Zoom & navigation controls         */
-  /* ---------------------------------- */
+  const pinchRef = useRef(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || status !== "ready") return undefined;
+
+    const getDistance = (t) =>
+      Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+    const getMidpoint = (t) => ({
+      x: (t[0].clientX + t[1].clientX) / 2,
+      y: (t[0].clientY + t[1].clientY) / 2,
+    });
+
+    const onTouchStart = (e) => {
+      if (e.touches.length !== 2) return;
+      const mid = getMidpoint(e.touches);
+      const rect = el.getBoundingClientRect();
+      pinchRef.current = {
+        startDist: getDistance(e.touches),
+        startScale: scaleRef.current,
+        startScrollTop: el.scrollTop,
+        startScrollLeft: el.scrollLeft,
+        midRelY: mid.y - rect.top + el.scrollTop,
+        midRelX: mid.x - rect.left + el.scrollLeft,
+        midClientY: mid.y,
+        midClientX: mid.x,
+      };
+    };
+
+    const onTouchMove = (e) => {
+      if (e.touches.length !== 2 || !pinchRef.current) return;
+      e.preventDefault();
+
+      const dist = getDistance(e.touches);
+      const rawFactor = dist / pinchRef.current.startDist;
+      const newScale = clamp(
+        pinchRef.current.startScale * rawFactor,
+        MIN_SCALE,
+        MAX_SCALE
+      );
+      const fit = fitScaleRef.current || 1;
+      const newZoom = newScale / fit;
+
+      const scaleRatio = newScale / pinchRef.current.startScale;
+      const newScrollTop =
+        pinchRef.current.midRelY * scaleRatio - (pinchRef.current.midClientY - el.getBoundingClientRect().top);
+      const newScrollLeft =
+        pinchRef.current.midRelX * scaleRatio - (pinchRef.current.midClientX - el.getBoundingClientRect().left);
+
+      anchorRef.current = null;
+      setZoom(newZoom);
+
+      requestAnimationFrame(() => {
+        if (!el) return;
+        el.scrollTop = newScrollTop;
+        el.scrollLeft = newScrollLeft;
+      });
+    };
+
+    const onTouchEnd = (e) => {
+      if (e.touches.length < 2) pinchRef.current = null;
+    };
+
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [status]);
 
   const captureAnchor = useCallback(() => {
     const el = scrollRef.current;

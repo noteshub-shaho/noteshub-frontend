@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../services/api";
 import { getDeviceFingerprints } from "../../utils/fingerprint";
@@ -62,6 +62,7 @@ const RecoveryStatusPill = ({ status }) => {
 export default function PaidNoteViewer() {
   const { university, semester, subject, subSubject } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { isAuthenticated, user } = useAuth();
 
   const noteKey = subSubject
@@ -192,7 +193,9 @@ export default function PaidNoteViewer() {
         user?.email || "",
         file.name.replace(/_[a-z0-9]{4,}$/i, "").replace(/\.[^.]+$/, "")
       );
-      navigate("/pdf-viewer");
+      // `from` lets the viewer return to this exact screen even when there
+      // is no browser-history entry behind it (e.g. direct URL entry).
+      navigate("/pdf-viewer", { state: { from: location.pathname } });
     } catch (err) {
       const msg = err.response?.data?.message || "";
       if (msg === "No entitlement") {

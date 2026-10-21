@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import * as pdfjsLib from "pdfjs-dist";
 import { pdfStore } from "../../utils/pdfStore";
 import "./pdfViewer.css";
@@ -62,22 +62,39 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 export default function PdfViewerPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const rootRef = useRef(null);
   const scrollRef = useRef(null);
   const pagesElRef = useRef(null);
   const pdfDocRef = useRef(null);
+  const pdfTaskRef = useRef(null);
   const dimsRef = useRef([]);
   const renderedRef = useRef(new Map());
   const offsetsRef = useRef([]);
-  const anchorRef = useRef(null);
   const scrollRafRef = useRef(0);
   const scaleRef = useRef(1);
   const fitScaleRef = useRef(0);
+  /** Pinch gesture state — refs only, so touch tracking never re-renders React. */
+  const pinchRef = useRef(null);
+  const pinchRafRef = useRef(0);
+  /** Scroll anchor applied in the layout effect right after a zoom commit. */
+  const pendingAnchorRef = useRef(null);
+  /** Live zoom readout updated directly during a pinch gesture. */
+  const zoomLabelRef = useRef(null);
 
   // Read the in-memory store once (via lazy state init, not during render via ref).
   const [storeInfo] = useState(() => pdfStore.get());
   const userEmail = storeInfo.email;
   const pdfTitle = storeInfo.title;
+
+  // Route the viewer was opened from (set by the launching screen), used as
+  // the safe destination when there is no browser-history entry to go back to.
+  const returnTo =
+    typeof location.state?.from === "string" &&
+    location.state.from.startsWith("/") &&
+    location.state.from !== "/pdf-viewer"
+      ? location.state.from
+      : null;
 
   const [dims, setDims] = useState(null);
   const [totalPages, setTotalPages] = useState(0);
@@ -94,10 +111,15 @@ export default function PdfViewerPage() {
   /* Document loading (secure data comes from pdfStore — unchanged flow) */
   /* ------------------------------------------------------------------ */
 
+  const safeFallback = useCallback(() => {
+    navigate(returnTo || "/dashboard", { replace: true });
+  }, [navigate, returnTo]);
+
   useEffect(() => {
     const data = storeInfo.data;
     if (!data) {
-      navigate(-1);
+      // Direct link / expired session state: never leave a blank screen.
+      safeFallback();
       return undefined;
     }
 
@@ -105,7 +127,15 @@ export default function PdfViewerPage() {
     const renderedMap = renderedRef.current;
     (async () => {
       try {
-        const pdf = await pdfjsLib.getDocument({ data }).promise;
+        // Keep a reference to the LOADING TASK (not just the document):
+        // pdf.js v6+ PDFDocumentProxy has no destroy(); the task owns the
+        // worker/transport and is what must be destroyed on unmount.
+        // pdf.js transfers the buffer to its worker (detaching it), so pass
+        // a copy — this keeps the stored bytes usable if the effect ever
+        // re-runs (StrictMode, remounts) instead of failing with DataCloneError.
+        const task = pdfjsLib.getDocument({ data: data.slice() });
+        pdfTaskRef.current = task;
+        const pdf = await task.promise;
         // Page metadata (dimensions) for every page keeps the layout stable
         // while canvases are lazily rendered during scrolling.
         const pageDims = await Promise.all(
@@ -116,7 +146,11 @@ export default function PdfViewerPage() {
           })
         );
         if (cancelled) {
-          pdf.destroy();
+          try {
+            void task.destroy();
+          } catch {
+            /* already destroyed */
+          }
           return;
         }
         pdfDocRef.current = pdf;
@@ -137,12 +171,22 @@ export default function PdfViewerPage() {
       pdfStore.clear();
       renderedMap.clear();
       offsetsRef.current = [];
-      if (pdfDocRef.current) {
-        pdfDocRef.current.destroy();
-        pdfDocRef.current = null;
+      pdfDocRef.current = null;
+      if (scrollRafRef.current) {
+        cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = 0;
+      }
+      const task = pdfTaskRef.current;
+      pdfTaskRef.current = null;
+      if (task) {
+        try {
+          void task.destroy();
+        } catch {
+          /* already destroyed */
+        }
       }
     };
-  }, [storeInfo.data, navigate]);
+  }, [storeInfo.data, safeFallback]);
 
   /* ---------------------------------- */
   /* Viewport width measurement         */
@@ -330,10 +374,16 @@ export default function PdfViewerPage() {
     const children = docEl.children;
     const scrollRect = scrollEl.getBoundingClientRect();
     const scrollTop = scrollEl.scrollTop;
+    const scrollLeft = scrollEl.scrollLeft;
     const next = new Array(children.length);
     for (let i = 0; i < children.length; i++) {
       const r = children[i].getBoundingClientRect();
-      next[i] = { top: r.top - scrollRect.top + scrollTop, height: r.height };
+      next[i] = {
+        top: r.top - scrollRect.top + scrollTop,
+        height: r.height,
+        left: r.left - scrollRect.left + scrollLeft,
+        width: r.width,
+      };
     }
     offsetsRef.current = next;
   }, []);
@@ -358,22 +408,90 @@ export default function PdfViewerPage() {
     return () => el.removeEventListener("scroll", scheduleScrollWork);
   }, [status, scheduleScrollWork]);
 
+  /* ---------------------------------- */
+  /* Zoom anchoring (pinch + buttons)   */
+  /* ---------------------------------- */
+
+  /**
+   * Capture the content point currently under (clientX, clientY) as a
+   * page-relative anchor, so it can be restored after the layout changes
+   * to a new scale. Works on the untransformed layout (used for the zoom
+   * buttons and by the pinch commit once its transform is removed).
+   */
+  const captureAnchorAt = useCallback((clientX, clientY) => {
+    const offs = offsetsRef.current;
+    if (!offs.length) return null;
+    const scrollEl = scrollRef.current;
+    const docEl = pagesElRef.current;
+    if (!scrollEl || !docEl) return null;
+    const scrollRect = scrollEl.getBoundingClientRect();
+    // Page offsets are stored in scroll-content coordinates; keep the
+    // anchor in the same coordinate space to stay exact.
+    const x = clientX - scrollRect.left + scrollEl.scrollLeft;
+    const y = clientY - scrollRect.top + scrollEl.scrollTop;
+    let idx = 0;
+    for (let i = 0; i < offs.length; i++) {
+      if (offs[i] && offs[i].top <= y) idx = i;
+      else break;
+    }
+    const p = offs[idx];
+    if (!p) return null;
+    return {
+      i: idx,
+      ratio: p.height > 0 ? clamp((y - p.top) / p.height, 0, 1) : 0,
+      xInPage: x - (p.left || 0),
+      oldScale: scaleRef.current,
+      clientX,
+      clientY,
+    };
+  }, []);
+
+  /**
+   * Scroll so the anchored content point sits back at its captured client
+   * position, now that the layout has been re-measured at the new scale.
+   */
+  const applyAnchor = useCallback((a) => {
+    const el = scrollRef.current;
+    const docEl = pagesElRef.current;
+    if (!el || !docEl) return;
+    const pageNode = docEl.children[a.i];
+    if (!pageNode) return;
+    const ratio = scaleRef.current / (a.oldScale || 1);
+    const pr = pageNode.getBoundingClientRect();
+    el.scrollTop += pr.top + a.ratio * pr.height - a.clientY;
+    el.scrollLeft += pr.left + a.xInPage * ratio - a.clientX;
+  }, []);
+
   /* Layout measurement + scroll anchoring whenever the scale changes. */
   useLayoutEffect(() => {
     if (status !== "ready" || !dims || !availableWidth) return;
-    measureOffsets();
-    const anchor = anchorRef.current;
-    anchorRef.current = null;
-    const el = scrollRef.current;
-    if (anchor && el) {
-      const p = offsetsRef.current[anchor.i];
-      if (p) el.scrollTop = p.top + anchor.ratio * p.height;
+    const docEl = pagesElRef.current;
+    const anchor = pendingAnchorRef.current;
+    pendingAnchorRef.current = null;
+    if (anchor && docEl) {
+      // A committed pinch: drop the temporary visual transform — the real
+      // layout now matches it — and keep the anchor point under the same
+      // spot on screen. Runs before paint, so there is no visible jump.
+      docEl.style.transform = "";
+      docEl.style.transformOrigin = "";
+      applyAnchor(anchor);
     }
+    measureOffsets();
     updateCurrentPage();
     managePages();
-  }, [status, dims, availableWidth, scale, measureOffsets, managePages, updateCurrentPage]);
+  }, [status, dims, availableWidth, scale, measureOffsets, managePages, updateCurrentPage, applyAnchor]);
 
-  const pinchRef = useRef(null);
+  /* ---------------------------------- */
+  /* Pinch-to-zoom gesture              */
+  /*                                                          */
+  /* The gesture runs entirely on refs + direct DOM writes:   */
+  /* during tracking, the document gets a composited CSS      */
+  /* transform (GPU scale around the finger midpoint) and NO  */
+  /* React state changes, no re-layout and no PDF re-renders  */
+  /* happen. Exactly one React commit occurs when the gesture */
+  /* ends: the final scale is committed and the visible pages */
+  /* are re-rendered once at full resolution.                  */
+  /* ---------------------------------- */
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -387,99 +505,247 @@ export default function PdfViewerPage() {
       y: (t[0].clientY + t[1].clientY) / 2,
     });
 
+    const setDocTransform = (g, factor, dx, dy) => {
+      const docEl = pagesElRef.current;
+      if (!docEl) return;
+      docEl.style.transformOrigin = `${g.origin.x}px ${g.origin.y}px`;
+      docEl.style.transform =
+        factor === 1 && dx === 0 && dy === 0
+          ? ""
+          : `translate(${dx}px, ${dy}px) scale(${factor})`;
+    };
+
+    const setZoomLabel = (value) => {
+      if (zoomLabelRef.current) {
+        zoomLabelRef.current.textContent = `${Math.round(value * 100)}%`;
+      }
+    };
+
+    const applyGestureFrame = () => {
+      pinchRafRef.current = 0;
+      const g = pinchRef.current;
+      if (!g || !g.move) return;
+      const move = g.move;
+      g.move = null;
+      const visual = clamp(
+        g.layoutScale * (move.dist / g.startDist),
+        MIN_SCALE,
+        MAX_SCALE
+      );
+      g.visualScale = visual;
+      setDocTransform(
+        g,
+        visual / g.layoutScale,
+        g.baseDx + (move.midX - g.mid0.x),
+        g.baseDy + (move.midY - g.mid0.y)
+      );
+      setZoomLabel(visual);
+    };
+
+    const scheduleGestureFrame = () => {
+      if (pinchRafRef.current) return;
+      pinchRafRef.current = requestAnimationFrame(applyGestureFrame);
+    };
+
+    /**
+     * Re-anchor the gesture when the set of fingers changes (a finger is
+     * lifted and another lands, etc.). The visual state (scale + position)
+     * is preserved exactly; only the input baseline is reset.
+     */
+    const rebaselineGesture = (touches) => {
+      const g = pinchRef.current;
+      if (!g) return;
+      const mid = getMidpoint(touches);
+      const f = g.visualScale / g.layoutScale;
+      const dx = g.baseDx + (mid.x - g.mid0.x);
+      const dy = g.baseDy + (mid.y - g.mid0.y);
+      // Doc-layout point currently under the new midpoint:
+      // pos(O') = docRect0 + O + f*(O' - O) + d = mid
+      //   => O' = O + (mid - docRect0 - O - d) / f
+      const origin = {
+        x: g.origin.x + (mid.x - g.docLeft - g.origin.x - dx) / f,
+        y: g.origin.y + (mid.y - g.docTop - g.origin.y - dy) / f,
+      };
+      // Re-parameterize the same transform around the new origin/baseline
+      // so nothing moves at the moment of the switch.
+      g.baseDx += (g.origin.x - origin.x) * (1 - f);
+      g.baseDy += (g.origin.y - origin.y) * (1 - f);
+      g.origin = origin;
+      g.mid0 = mid;
+      g.startDist = getDistance(touches) || 1;
+      g.move = null;
+    };
+
+    /** End the gesture: commit the final scale with a single React update. */
+    const endGesture = () => {
+      const g = pinchRef.current;
+      if (!g) return;
+      // Apply the last tracked frame first, so the committed state matches
+      // where the fingers actually ended up.
+      if (g.move) applyGestureFrame();
+      pinchRef.current = null;
+      if (pinchRafRef.current) {
+        cancelAnimationFrame(pinchRafRef.current);
+        pinchRafRef.current = 0;
+      }
+      const docEl = pagesElRef.current;
+      const f = g.visualScale / g.layoutScale;
+
+      if (Math.abs(g.visualScale - g.layoutScale) < 1e-3 || !docEl) {
+        // No net zoom change — simply drop the temporary transform.
+        if (docEl) {
+          docEl.style.transform = "";
+          docEl.style.transformOrigin = "";
+        }
+        setZoomLabel(scaleRef.current);
+        return;
+      }
+
+      // Content point under the current midpoint, expressed back in the
+      // pre-gesture (committed layout) coordinates, used as the scroll
+      // anchor. pos(X) = docRect0 + O + f*(X - O) + d = lastMid
+      //   => X = O + (lastMid - docRect0 - O - d) / f
+      const offs = offsetsRef.current;
+      const scrollEl = scrollRef.current;
+      const scRect = scrollEl?.getBoundingClientRect();
+      const dx = g.baseDx + (g.lastMidX - g.mid0.x);
+      const dy = g.baseDy + (g.lastMidY - g.mid0.y);
+      const X = {
+        x: g.origin.x + (g.lastMidX - g.docLeft - g.origin.x - dx) / f,
+        y: g.origin.y + (g.lastMidY - g.docTop - g.origin.y - dy) / f,
+      };
+      // Doc-layout coords -> scroll-content coords (the doc can sit inside
+      // scroller padding and carries un-scaled margins of its own).
+      const docLeftContent = scRect ? g.docLeft - scRect.left + scrollEl.scrollLeft : 0;
+      const docTopContent = scRect ? g.docTop - scRect.top + scrollEl.scrollTop : 0;
+      const contentX = X.x + docLeftContent;
+      const contentY = X.y + docTopContent;
+      let idx = 0;
+      for (let i = 0; i < offs.length; i++) {
+        if (offs[i] && offs[i].top <= contentY) idx = i;
+        else break;
+      }
+      const p = offs[idx];
+      pendingAnchorRef.current = p
+        ? {
+            i: idx,
+            ratio: p.height > 0 ? clamp((contentY - p.top) / p.height, 0, 1) : 0,
+            xInPage: contentX - (p.left || 0),
+            oldScale: g.layoutScale,
+            clientX: g.lastMidX,
+            clientY: g.lastMidY,
+          }
+        : null;
+      setZoom(g.visualScale / (fitScaleRef.current || 1));
+    };
+
     const onTouchStart = (e) => {
-      if (e.touches.length !== 2) return;
+      if (e.touches.length !== 2 || pinchRef.current) return;
+      // A previous gesture's zoom commit has not been applied to the layout
+      // yet; starting now would capture stale geometry. Wait for the commit.
+      if (pendingAnchorRef.current) return;
+      const docEl = pagesElRef.current;
+      if (!docEl) return;
+      // Rect of the UNTRANSFORMED document (the gesture clears any previous
+      // transform before starting, so this is exact).
+      const docRect = docEl.getBoundingClientRect();
       const mid = getMidpoint(e.touches);
-      const rect = el.getBoundingClientRect();
       pinchRef.current = {
-        startDist: getDistance(e.touches),
-        startScale: scaleRef.current,
-        startScrollTop: el.scrollTop,
-        startScrollLeft: el.scrollLeft,
-        midRelY: mid.y - rect.top + el.scrollTop,
-        midRelX: mid.x - rect.left + el.scrollLeft,
-        midClientY: mid.y,
-        midClientX: mid.x,
+        layoutScale: scaleRef.current,
+        visualScale: scaleRef.current,
+        startDist: getDistance(e.touches) || 1,
+        origin: { x: mid.x - docRect.left, y: mid.y - docRect.top },
+        docLeft: docRect.left,
+        docTop: docRect.top,
+        mid0: mid,
+        lastMidX: mid.x,
+        lastMidY: mid.y,
+        baseDx: 0,
+        baseDy: 0,
+        move: null,
       };
     };
 
     const onTouchMove = (e) => {
-      if (e.touches.length !== 2 || !pinchRef.current) return;
-      e.preventDefault();
-
-      const dist = getDistance(e.touches);
-      const rawFactor = dist / pinchRef.current.startDist;
-      const newScale = clamp(
-        pinchRef.current.startScale * rawFactor,
-        MIN_SCALE,
-        MAX_SCALE
-      );
-      const fit = fitScaleRef.current || 1;
-      const newZoom = newScale / fit;
-
-      const scaleRatio = newScale / pinchRef.current.startScale;
-      const newScrollTop =
-        pinchRef.current.midRelY * scaleRatio - (pinchRef.current.midClientY - el.getBoundingClientRect().top);
-      const newScrollLeft =
-        pinchRef.current.midRelX * scaleRatio - (pinchRef.current.midClientX - el.getBoundingClientRect().left);
-
-      anchorRef.current = null;
-      setZoom(newZoom);
-
-      requestAnimationFrame(() => {
-        if (!el) return;
-        el.scrollTop = newScrollTop;
-        el.scrollLeft = newScrollLeft;
-      });
+      const g = pinchRef.current;
+      if (!g || e.touches.length < 2) return;
+      // Keep the browser from panning/zooming the page while two fingers
+      // drive our gesture. One-finger scrolling is untouched (this handler
+      // ignores single-touch moves).
+      if (e.cancelable) e.preventDefault();
+      const mid = getMidpoint(e.touches);
+      g.lastMidX = mid.x;
+      g.lastMidY = mid.y;
+      g.move = { dist: getDistance(e.touches), midX: mid.x, midY: mid.y };
+      scheduleGestureFrame();
     };
 
     const onTouchEnd = (e) => {
-      if (e.touches.length < 2) pinchRef.current = null;
+      const g = pinchRef.current;
+      if (!g) return;
+      if (e.touches.length >= 2) {
+        rebaselineGesture(e.touches);
+        return;
+      }
+      // Fewer than two fingers: finish the gesture and commit the zoom.
+      endGesture();
     };
 
     el.addEventListener("touchstart", onTouchStart, { passive: true });
     el.addEventListener("touchmove", onTouchMove, { passive: false });
     el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
     return () => {
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+      if (pinchRafRef.current) {
+        cancelAnimationFrame(pinchRafRef.current);
+        pinchRafRef.current = 0;
+      }
+      pinchRef.current = null;
     };
   }, [status]);
 
-  const captureAnchor = useCallback(() => {
-    const el = scrollRef.current;
-    const offs = offsetsRef.current;
-    if (!el || !offs.length) return null;
-    const top = el.scrollTop;
-    let idx = 0;
-    for (let i = 0; i < offs.length; i++) {
-      if (offs[i] && offs[i].top <= top + 1) idx = i;
-      else break;
-    }
-    const p = offs[idx];
-    const ratio =
-      p && p.height > 0 ? clamp((top - p.top) / p.height, 0, 1) : 0;
-    return { i: idx, ratio };
-  }, []);
+  /* ---------------------------------- */
+  /* Zoom controls                      */
+  /* ---------------------------------- */
 
   const changeZoom = useCallback(
     (factor) => {
-      const fit = fitScaleRef.current || 1;
+      const el = scrollRef.current;
+      if (!el) return;
       const next = clamp(scaleRef.current * factor, MIN_SCALE, MAX_SCALE);
-      anchorRef.current = captureAnchor();
-      setZoom(next / fit);
+      if (Math.abs(next - scaleRef.current) < 1e-3) {
+        setJumpOpen(false);
+        return;
+      }
+      // Anchor the viewport center so zoom buttons keep the reading position
+      // on both axes.
+      const rect = el.getBoundingClientRect();
+      pendingAnchorRef.current = captureAnchorAt(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2
+      );
+      setZoom(next / (fitScaleRef.current || 1));
       setJumpOpen(false);
     },
-    [captureAnchor]
+    [captureAnchorAt]
   );
 
   const resetZoom = useCallback(() => {
-    anchorRef.current = captureAnchor();
+    const el = scrollRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    pendingAnchorRef.current = captureAnchorAt(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2
+    );
     setZoom(1);
     setJumpOpen(false);
-  }, [captureAnchor]);
+  }, [captureAnchorAt]);
 
   const jumpToPage = useCallback(
     (n) => {
@@ -493,7 +759,20 @@ export default function PdfViewerPage() {
     [totalPages]
   );
 
-  const handleClose = useCallback(() => navigate(-1), [navigate]);
+  /**
+   * Close: go back to the previous in-app screen when the browser history
+   * has one; otherwise fall back to a safe NotesHub route. This keeps the
+   * X button and the browser Back button consistent and never strands the
+   * user on a blank screen (e.g. after opening /pdf-viewer directly).
+   */
+  const handleClose = useCallback(() => {
+    const idx = window.history.state?.idx;
+    if (typeof idx === "number" && idx > 0) {
+      navigate(-1);
+    } else {
+      safeFallback();
+    }
+  }, [navigate, safeFallback]);
 
   /* ---------------------------------- */
   /* Fullscreen (optional)              */
@@ -539,14 +818,27 @@ export default function PdfViewerPage() {
   /* Rendered page list                 */
   /* ---------------------------------- */
 
-  const docElement = useMemo(() => {
+  const docStyle = useMemo(() => {
     if (!dims || !availableWidth || !scale) return null;
     const maxW = dims.reduce((m, d) => Math.max(m, d.w), 0);
+    // Scaled spacing keeps the layout purely linear in `scale`, so a
+    // committed pinch matches the gesture's uniform transform exactly
+    // (fixed-px gaps would shift content near page boundaries at commit).
+    const wide = typeof window !== "undefined" && window.innerWidth >= 640;
+    return {
+      width: maxW * scale,
+      gap: `${(wide ? 18 : 14) * scale}px`,
+      padding: `${(wide ? 18 : 14) * scale}px 0 ${(wide ? 32 : 28) * scale}px`,
+    };
+  }, [dims, availableWidth, scale]);
+
+  const docElement = useMemo(() => {
+    if (!dims || !availableWidth || !scale || !docStyle) return null;
     return (
       <div
         className="pv-doc"
         ref={pagesElRef}
-        style={{ width: maxW * scale }}
+        style={docStyle}
         onContextMenu={(e) => e.preventDefault()}
         onDragStart={(e) => e.preventDefault()}
       >
@@ -563,7 +855,7 @@ export default function PdfViewerPage() {
         ))}
       </div>
     );
-  }, [dims, availableWidth, scale]);
+  }, [dims, availableWidth, scale, docStyle]);
 
   /* ---------------------------------- */
   /* Screens                            */
@@ -652,7 +944,9 @@ export default function PdfViewerPage() {
           >
             −
           </button>
-          <span className="pv-zoom-value">{Math.round(scale * 100)}%</span>
+          <span className="pv-zoom-value" ref={zoomLabelRef}>
+            {Math.round(scale * 100)}%
+          </span>
           <button
             className="pv-btn"
             onClick={() => changeZoom(ZOOM_STEP)}

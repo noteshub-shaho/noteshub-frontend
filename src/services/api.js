@@ -65,7 +65,15 @@ export const api = {
   paidNotes: {
     getConfig: (noteKey) => client.get(`/api/paid-notes/config/${noteKey}`),
     getFileList: (noteKey) => client.get(`/api/paid-notes/files/${noteKey}`),
-    createOrder: (noteKey) => client.post("/api/paid-notes/purchase/create-order", { noteKey }),
+    createOrder: (noteKey, couponCode) =>
+      client.post("/api/paid-notes/purchase/create-order", {
+        noteKey,
+        ...(couponCode ? { couponCode } : {}),
+      }),
+    validateCoupon: (code, noteKey) =>
+      client.post("/api/paid-notes/coupons/validate", { code, noteKey }),
+    getEligibleCoupon: (noteKey) =>
+      client.get(`/api/paid-notes/coupons/eligible/${noteKey}`),
     verifyPurchase: (data, fingerprints) =>
       client.post("/api/paid-notes/purchase/verify", data, {
         headers: buildDeviceHeaders(null, fingerprints),

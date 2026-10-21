@@ -5,6 +5,7 @@ import { api } from "../../services/api";
 import { getDeviceFingerprints } from "../../utils/fingerprint";
 import PurchaseModal from "../../components/modals/PurchaseModal";
 import RecoveryRequestModal from "../../components/modals/RecoveryRequestModal";
+import CouponPromoBanner from "../../components/CouponPromoBanner";
 import { pdfStore } from "../../utils/pdfStore";
 
 import "./app.css";
@@ -78,6 +79,7 @@ export default function PaidNoteViewer() {
   const [openingFile, setOpeningFile] = useState(null);
   const [recoveryInfo, setRecoveryInfo] = useState(null);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [hasEligibleCoupon, setHasEligibleCoupon] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -101,6 +103,13 @@ export default function PaidNoteViewer() {
       .catch(() => setFileList([]))
       .finally(() => setPageLoading(false));
   }, [noteKey]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    api.paidNotes.getEligibleCoupon(noteKey)
+      .then((res) => setHasEligibleCoupon(!!res.data?.eligible))
+      .catch(() => setHasEligibleCoupon(false));
+  }, [noteKey, isAuthenticated]);
 
   useEffect(() => {
     if (!fingerprints || !isAuthenticated) return;
@@ -215,6 +224,14 @@ export default function PaidNoteViewer() {
               : `Paid notes · ₹${notePrice}`}
           </p>
         </div>
+
+        {entitlementStatus === "not-purchased" && !hasEligibleCoupon && (
+          <CouponPromoBanner
+            userName={user?.username}
+            userEmail={user?.email}
+            noteTitle={noteTitle || noteKey.split("/").pop().replace(/-/g, " ")}
+          />
+        )}
 
         {entitlementStatus === "device-blocked" && (
           <div className="files-status-card" style={{ marginBottom: "1.5rem" }}>

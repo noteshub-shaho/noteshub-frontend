@@ -27,7 +27,7 @@ const Navbar = () => {
   const authNavItems = [
     { name: "Dashboard", path: "/dashboard" },
     { name: "Access Notes", path: "/access-notes" },
-    { name: "Disclaimer", path: "/disclaimer" },
+    { name: "Terms", path: "/terms" },
     { name: "Contact Us", path: "/contact" },
   ];
 

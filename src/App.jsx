@@ -24,6 +24,7 @@ import Navbar from "./components/navigation/Navbar";
 import PageWrapper from "./components/common/PageWrapper";
 import ScrollToTop from "./components/common/ScrollToTop";
 import Disclaimer from "./pages/legal/Disclaimer";
+import TermsAndConditions from "./pages/legal/TermsAndConditions";
 import TermsModal from "./components/modals/TermsModal";
 
 const DotsLoader = () => (
@@ -70,6 +71,7 @@ const AnimatedRoutes = () => {
           <Route path="/auth/callback" element={<OAuthCallback />} />
           <Route path="/dashboard" element={<ProtectedRoute><PageWrapper><Dashboard /></PageWrapper></ProtectedRoute>} />
           <Route path="/disclaimer" element={<ProtectedRoute><PageWrapper><Disclaimer /></PageWrapper></ProtectedRoute>} />
+          <Route path="/terms" element={<ProtectedRoute><PageWrapper><TermsAndConditions /></PageWrapper></ProtectedRoute>} />
           <Route path="/contact" element={<ProtectedRoute><PageWrapper><ContactUs /></PageWrapper></ProtectedRoute>} />
           <Route path="/access-notes" element={<PageWrapper><AccessNotes /></PageWrapper>} />
           <Route path="/subjects/:university/:semester" element={<PageWrapper><Subjects /></PageWrapper>} />

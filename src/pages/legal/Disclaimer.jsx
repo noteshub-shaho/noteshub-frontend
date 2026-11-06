@@ -54,11 +54,69 @@ const Disclaimer = () => {
             such as syllabus updates, exam schedules, and official notices directly
             from their university or institute websites.
           </p>
-          <p style={{ marginBottom: "1.25rem" }}>
+          <p style={{ marginBottom: "2rem" }}>
             By using NotesHub, you acknowledge and agree to this disclaimer policy
             and accept that the platform is intended purely as a supportive
             educational tool.
           </p>
+
+          <hr style={{ border: "none", borderTop: "1.5px solid #f1f5f9", marginBottom: "2rem" }} />
+
+          <div style={{ marginBottom: "2rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "0.75rem" }}>
+              <div style={{ width: 36, height: 36, borderRadius: "10px", background: "#eef2ff", color: "#4f46e5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+              </div>
+              <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "#0f172a" }}>Device Restriction</h2>
+            </div>
+            <p style={{ margin: 0, lineHeight: 1.85 }}>
+              Paid notes on NotesHub can only be accessed on the device used at the time of purchase. Once a purchase is completed, access is bound to that specific device and cannot be transferred to or used from another device. If you lose access to your registered device, you may submit a device recovery request through the platform, subject to admin review and approval. NotesHub reserves the right to approve or reject recovery requests at its discretion.
+            </p>
+          </div>
+
+          <hr style={{ border: "none", borderTop: "1.5px solid #f1f5f9", marginBottom: "2rem" }} />
+
+          <div style={{ marginBottom: "2rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "0.75rem" }}>
+              <div style={{ width: 36, height: 36, borderRadius: "10px", background: "#fef2f2", color: "#dc2626", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                </svg>
+              </div>
+              <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "#0f172a" }}>Non-Refundable Payments</h2>
+            </div>
+            <p style={{ margin: 0, lineHeight: 1.85 }}>
+              All payments made on NotesHub for paid notes or any other services are strictly non-refundable. Once a payment is successfully processed, the transaction is considered final and no refund will be issued under any circumstances, including accidental purchases, change of mind, or dissatisfaction with the content. We strongly encourage users to carefully review the note details, pricing, and terms before proceeding with any payment.
+            </p>
+          </div>
+
+          <hr style={{ border: "none", borderTop: "1.5px solid #f1f5f9", marginBottom: "2rem" }} />
+
+          <div style={{ marginBottom: "0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "0.75rem" }}>
+              <div style={{ width: 36, height: 36, borderRadius: "10px", background: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+              </div>
+              <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "#0f172a" }}>Support &amp; Assistance</h2>
+            </div>
+            <p style={{ margin: 0, lineHeight: 1.85 }}>
+              If you face any issues related to payment, device access, or technical problems while using NotesHub, our support team is here to help. Please reach out to us through our{" "}
+              <a
+                href="https://noteshub-app.onrender.com/contact"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: "#4f46e5", fontWeight: 600, textDecoration: "none", borderBottom: "1.5px solid #c7d2fe" }}
+              >
+                Contact Us
+              </a>{" "}
+              page and we will do our best to resolve your concern promptly.
+            </p>
+          </div>
+
         </div>
 
       </main>

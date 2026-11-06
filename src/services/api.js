@@ -141,6 +141,7 @@ export const api = {
 
   paidNotes: {
     getConfig: (noteKey) => client.get(`/api/paid-notes/config/${noteKey}`),
+    getImportantNotes: () => client.get("/api/paid-notes/important"),
     getFileList: (noteKey) => client.get(`/api/paid-notes/files/${noteKey}`),
     createOrder: (noteKey, couponCode) =>
       client.post("/api/paid-notes/purchase/create-order", {

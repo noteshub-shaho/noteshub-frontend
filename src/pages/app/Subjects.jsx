@@ -30,8 +30,8 @@ const Subjects = () => {
 
   const subjectsData = {
     mu: {
-      sem3: ["aoa", "coa", "maths", "dsgt", "genai", "important-answers"],
-      sem4: ["syllabus", "cth", "os", "dbms", "web-technologies", "oe-ibs", "lab-experiments", "assignments", "Business-Model-Development", "Design-Thinking", "important-answers" ,"internal-assessments"],
+      sem3: ["important-answers", "aoa", "coa", "maths", "dsgt", "genai"],
+      sem4: ["important-answers", "syllabus", "cth", "os", "dbms", "web-technologies", "oe-ibs", "lab-experiments", "assignments", "Business-Model-Development", "Design-Thinking", "internal-assessments"],
       sem5: ["syllabus", "lab-experiment","internal-assessments-1"],
     },
     msbte: {
@@ -154,28 +154,74 @@ const Subjects = () => {
         </div>
 
         <div className="notes-grid">
-          {displayList.map((item, index) => (
-            <div key={index} className="notes-card">
-              <h3 style={{ margin: "0 0 4px", fontWeight: 700, fontSize: "1.1rem", color: "#0f172a" }}>
-                {item.toUpperCase().replace(/-/g, " ")}
-              </h3>
-              {nestedSubjects[item] && !activeParent && (
-                <p style={{ margin: 0, fontSize: "0.875rem", color: "#64748b" }}>
-                  {nestedSubjects[item].length} subjects
-                </p>
-              )}
-              <button
-                onClick={() => activeParent ? handleSubClick(item) : handleSubjectClick(item)}
-                disabled={!!checkingKey}
-                className={`notes-btn ${isMu ? "mu" : "msbte"}`}
-                style={checkingKey ? { opacity: 0.7, cursor: "not-allowed" } : undefined}
+          {displayList.map((item, index) => {
+            const isImportant = item === "important-answers";
+            return (
+              <div
+                key={index}
+                className="notes-card"
+                style={isImportant ? {
+                  border: "1.5px solid #e0e7ff",
+                  background: "linear-gradient(135deg, #fafbff 0%, #f5f3ff 100%)",
+                  boxShadow: "0 4px 20px rgba(79,70,229,0.10)",
+                  position: "relative",
+                  overflow: "hidden",
+                } : undefined}
               >
-                {checkingKey
-                  ? "Checking..."
-                  : nestedSubjects[item] && !activeParent ? "View →" : "Open →"}
-              </button>
-            </div>
-          ))}
+                {isImportant && (
+                  <div style={{
+                    position: "absolute", top: 0, right: 0,
+                    background: "linear-gradient(135deg, #4f46e5, #6366f1)",
+                    color: "white", fontSize: "0.62rem", fontWeight: 700,
+                    padding: "4px 10px", borderRadius: "0 16px 0 10px",
+                    letterSpacing: "0.5px",
+                  }}>
+                    ⭐ IMPORTANT
+                  </div>
+                )}
+                {isImportant && (
+                  <div style={{
+                    width: 38, height: 38, borderRadius: "10px",
+                    background: "#eef2ff", color: "#4f46e5",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    marginBottom: "10px",
+                  }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                    </svg>
+                  </div>
+                )}
+                <h3 style={{
+                  margin: "0 0 4px", fontWeight: 700,
+                  fontSize: isImportant ? "1rem" : "1.1rem",
+                  color: isImportant ? "#3730a3" : "#0f172a",
+                  paddingRight: isImportant ? "70px" : 0,
+                }}>
+                  {item.toUpperCase().replace(/-/g, " ")}
+                </h3>
+                {isImportant && (
+                  <p style={{ margin: "0 0 4px", fontSize: "0.78rem", color: "#6366f1", fontWeight: 500 }}>
+                    Exam-ready answers
+                  </p>
+                )}
+                {nestedSubjects[item] && !activeParent && (
+                  <p style={{ margin: 0, fontSize: "0.875rem", color: "#64748b" }}>
+                    {nestedSubjects[item].length} subjects
+                  </p>
+                )}
+                <button
+                  onClick={() => activeParent ? handleSubClick(item) : handleSubjectClick(item)}
+                  disabled={!!checkingKey}
+                  className={`notes-btn ${isMu ? "mu" : "msbte"}`}
+                  style={checkingKey ? { opacity: 0.7, cursor: "not-allowed" } : undefined}
+                >
+                  {checkingKey
+                    ? "Checking..."
+                    : nestedSubjects[item] && !activeParent ? "View →" : "Open →"}
+                </button>
+              </div>
+            );
+          })}
         </div>
 
       </main>

@@ -75,15 +75,15 @@ export default function PdfViewerPage() {
   const scrollRafRef = useRef(0);
   const scaleRef = useRef(1);
   const fitScaleRef = useRef(0);
-  /** Pinch gesture state — refs only, so touch tracking never re-renders React. */
+
   const pinchRef = useRef(null);
   const pinchRafRef = useRef(0);
-  /** Scroll anchor applied in the layout effect right after a zoom commit. */
+
   const pendingAnchorRef = useRef(null);
-  /** Live zoom readout updated directly during a pinch gesture. */
+
   const zoomLabelRef = useRef(null);
 
-  // Read the in-memory store once (via lazy state init, not during render via ref).
+
   const [storeInfo] = useState(() => pdfStore.get());
   const userEmail = storeInfo.email;
   const pdfTitle = storeInfo.title;
@@ -128,12 +128,7 @@ export default function PdfViewerPage() {
     const renderedMap = renderedRef.current;
     (async () => {
       try {
-        // Keep a reference to the LOADING TASK (not just the document):
-        // pdf.js v6+ PDFDocumentProxy has no destroy(); the task owns the
-        // worker/transport and is what must be destroyed on unmount.
-        // pdf.js transfers the buffer to its worker (detaching it), so pass
-        // a copy — this keeps the stored bytes usable if the effect ever
-        // re-runs (StrictMode, remounts) instead of failing with DataCloneError.
+        
         const task = pdfjsLib.getDocument({ data: data.slice() });
         pdfTaskRef.current = task;
         const pdf = await task.promise;

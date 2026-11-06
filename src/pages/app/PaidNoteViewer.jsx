@@ -256,7 +256,7 @@ export default function PaidNoteViewer() {
                 {recoveryInfo.activeRequest.status === "PENDING" && (
                   <p style={{ color: "#64748b", fontSize: "0.82rem", textAlign: "center", margin: 0, lineHeight: 1.6 }}>
                     Recovery request submitted on {formatDateShort(recoveryInfo.activeRequest.createdAt)}.
-                    An admin is reviewing it — this page updates automatically.
+                    An admin is reviewing it, this page updates automatically.
                   </p>
                 )}
                 {recoveryInfo.activeRequest.status === "APPROVED" && (

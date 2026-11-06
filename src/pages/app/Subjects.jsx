@@ -19,8 +19,7 @@ const Subjects = () => {
   const { university, semester } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  // AuthContext resolves synchronously from localStorage, so this value is
-  // already accurate when a button is clicked — no network request needed.
+
   const { isAuthenticated } = useAuth();
 
   const [activeParent, setActiveParent] = useState(

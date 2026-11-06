@@ -17,12 +17,6 @@ client.interceptors.request.use((config) => {
   return config;
 });
 
-// Access tokens live for 10 days and refresh tokens for 30 (see backend).
-// On a 401 we renew the access token once — single-flight so parallel
-// requests (paid-note page fires several at once) share one refresh call —
-// then replay the original request. If renewal itself fails the session is
-// over: clear it and notify AuthContext. Network errors during refresh are
-// NOT treated as expiry, so a flaky connection can't log users out.
 let refreshPromise = null;
 
 const refreshAccessToken = () => {
@@ -62,11 +56,7 @@ client.interceptors.response.use(
       isCredentialRequest ||
       !localStorage.getItem("token")
     ) {
-      // Note: we deliberately still enter the refresh path when no refresh
-      // token is stored (legacy sessions). The refresh call then fails with
-      // a 4xx response and the session is cleared below — that is what
-      // un-sticks users whose access token already expired before this
-      // renewal flow existed.
+
       return Promise.reject(error);
     }
 
@@ -77,7 +67,7 @@ client.interceptors.response.use(
       return client(original);
     } catch (refreshError) {
       if (!refreshError.response) {
-        // Refresh request never reached the server — keep the session.
+  
         return Promise.reject(error);
       }
       localStorage.removeItem("token");

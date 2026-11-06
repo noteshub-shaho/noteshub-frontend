@@ -213,7 +213,7 @@ export default function PurchaseModal({ noteKey, noteTitle, fingerprints, onClos
                     color: "#15803d", display: "flex", alignItems: "center", gap: "6px",
                   }}>
                     <CheckIcon />
-                    You have an exclusive {eligibleCoupon.discountPercent}% OFF coupon for this note —
+                    You have an exclusive {eligibleCoupon.discountPercent}% OFF coupon for this note -
                     enter the code you received.
                   </p>
                 )}

@@ -50,7 +50,7 @@ if (onAccept) onAccept();
           borderBottom: "1px solid #f1f5f9",
         }}>
           <h2 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 700, color: "#0f172a" }}>
-            NotesHub — Terms & Conditions & Privacy Policy
+            NotesHub: Terms & Conditions & Privacy Policy
           </h2>
         </div>
 

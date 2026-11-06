@@ -9,3 +9,11 @@ html, body {
   margin: 0;
   padding: 0;
 }
+
+html.screenshot-detected body > *:not(#refresh-message) {
+  visibility: hidden;
+}
+
+html.screenshot-detected {
+  background-color: black;
+}

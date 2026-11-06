@@ -31,7 +31,7 @@ export default function OAuthCallback() {
           navigate("/login?error=google_auth_failed", { replace: true });
           return;
         }
-        login(data.user, data.token);
+        login(data.user, data.token, data.refreshToken);
         navigate("/dashboard", { replace: true });
       })
       .catch(() => {

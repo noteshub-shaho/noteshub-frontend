@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import usePersistScreenshotBlackout from "../../hooks/usePersistScreenshotBlackout";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { api } from "../../services/api";
@@ -210,6 +211,11 @@ export default function PaidNoteViewer() {
     }
   };
 
+  const ScreenshotGuard = () => {
+    usePersistScreenshotBlackout();
+    return null;
+  };
+
   const handleBack = () => navigate(`/subjects/${university}/${semester}`);
 
   if (!isAuthenticated) return null;
@@ -217,6 +223,7 @@ export default function PaidNoteViewer() {
 
   return (
     <div className="page-wrapper">
+      {entitlementStatus === "authorized" && <ScreenshotGuard />}
       <main className="page-container">
         <div className="hero-card">
           <button className="subjects-back-btn" onClick={handleBack}><BackIcon /> Go Back</button>

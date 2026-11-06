@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import usePersistScreenshotBlackout from "../../hooks/usePersistScreenshotBlackout";
 import { useLocation, useNavigate } from "react-router-dom";
 import * as pdfjsLib from "pdfjs-dist";
 import { pdfStore } from "../../utils/pdfStore";
@@ -804,19 +805,13 @@ export default function PdfViewerPage() {
     }
   }, []);
 
-  /* ---------------------------------- */
-  /* Tab visibility guard (unchanged)   */
-  /* ---------------------------------- */
+  usePersistScreenshotBlackout();
 
   useEffect(() => {
     const handleVisibility = () => setHidden(document.hidden);
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
-
-  /* ---------------------------------- */
-  /* Rendered page list                 */
-  /* ---------------------------------- */
 
   const docStyle = useMemo(() => {
     if (!dims || !availableWidth || !scale) return null;

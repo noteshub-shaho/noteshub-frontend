@@ -1,4 +1,5 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
+import { SESSION_EXPIRED_EVENT } from "../services/api";
 
 const AuthContext = createContext();
 
@@ -15,17 +16,50 @@ export const AuthProvider = ({ children }) => {
       return userData ? JSON.parse(userData) : null;
     } catch {
       localStorage.removeItem("token");
+      localStorage.removeItem("refreshToken");
       localStorage.removeItem("user");
       return null;
     }
   });
 
-  const login = (userData, token) => {
+  // Listen for the session-expired event dispatched by the api.js response
+  // interceptor when both the access token and refresh token have expired.
+  // Without this handler the user stays on the page with broken API calls
+  // indefinitely instead of being redirected to login.
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("user");
+      setIsAuthenticated(false);
+      setUser(null);
+      // Redirect to login, preserving the current path so the user is
+      // sent back after re-authenticating.
+      const redirect = encodeURIComponent(window.location.pathname);
+      window.location.href = `/login?redirect=${redirect}`;
+    };
+
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => {
+      window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    };
+  }, []);
+
+  // token       – short-lived access token (10 d)
+  // refreshToken – long-lived refresh token (30 d); may be absent for
+  //                legacy sessions that pre-date refresh support.
+  const login = (userData, token, refreshToken) => {
     const updatedUser = {
       ...userData,
       termsAccepted: userData?.termsAccepted ?? false,
     };
     localStorage.setItem("token", token);
+    if (refreshToken) {
+      localStorage.setItem("refreshToken", refreshToken);
+    } else {
+      // Never keep a previous account's refresh token around.
+      localStorage.removeItem("refreshToken");
+    }
     localStorage.setItem("user", JSON.stringify(updatedUser));
     setIsAuthenticated(true);
     setUser(updatedUser);
@@ -42,6 +76,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem("token");
+    localStorage.removeItem("refreshToken");
     localStorage.removeItem("user");
     setIsAuthenticated(false);
     setUser(null);

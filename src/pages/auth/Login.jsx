@@ -30,7 +30,7 @@ export default function Login() {
     setMessage(null);
     try {
       const res = await api.auth.login(form);
-      login(res.data.user, res.data.accessToken);
+      login(res.data.user, res.data.accessToken, res.data.refreshToken);
       navigate(redirectTo, { replace: true });
     } catch (err) {
       setMessage({

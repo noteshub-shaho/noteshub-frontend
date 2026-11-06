@@ -4,6 +4,11 @@ const client = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
 });
 
+// Emitted (on `window`) when a session cannot be renewed any more, so
+// AuthContext can drop the stale credentials and bounce the user to login
+// instead of leaving authenticated requests failing silently.
+export const SESSION_EXPIRED_EVENT = "auth:session-expired";
+
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
   if (token) {
@@ -11,6 +16,78 @@ client.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// Access tokens live for 10 days and refresh tokens for 30 (see backend).
+// On a 401 we renew the access token once — single-flight so parallel
+// requests (paid-note page fires several at once) share one refresh call —
+// then replay the original request. If renewal itself fails the session is
+// over: clear it and notify AuthContext. Network errors during refresh are
+// NOT treated as expiry, so a flaky connection can't log users out.
+let refreshPromise = null;
+
+const refreshAccessToken = () => {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post(`${import.meta.env.VITE_API_URL}/api/auth/refresh`, {
+        refreshToken: localStorage.getItem("refreshToken"),
+      })
+      .then((res) => {
+        const accessToken = res.data?.accessToken;
+        if (!accessToken) throw new Error("Refresh failed");
+        localStorage.setItem("token", accessToken);
+        return accessToken;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+};
+
+client.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const original = error.config || {};
+    const url = typeof original.url === "string" ? original.url : "";
+    // Credentials/refresh endpoints must not recurse into this handler:
+    // a rejected login is not an expired session.
+    const isCredentialRequest =
+      url.includes("/api/auth/login") ||
+      url.includes("/api/auth/register") ||
+      url.includes("/api/auth/refresh");
+
+    if (
+      error.response?.status !== 401 ||
+      original._retry ||
+      isCredentialRequest ||
+      !localStorage.getItem("token")
+    ) {
+      // Note: we deliberately still enter the refresh path when no refresh
+      // token is stored (legacy sessions). The refresh call then fails with
+      // a 4xx response and the session is cleared below — that is what
+      // un-sticks users whose access token already expired before this
+      // renewal flow existed.
+      return Promise.reject(error);
+    }
+
+    original._retry = true;
+    try {
+      const accessToken = await refreshAccessToken();
+      original.headers = { ...original.headers, Authorization: `Bearer ${accessToken}` };
+      return client(original);
+    } catch (refreshError) {
+      if (!refreshError.response) {
+        // Refresh request never reached the server — keep the session.
+        return Promise.reject(error);
+      }
+      localStorage.removeItem("token");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("user");
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+      return Promise.reject(error);
+    }
+  }
+);
 
 // Device credentials for paid-notes endpoints. `fingerprints` holds the
 // stable v2 fingerprint plus the legacy (pre-v2) one, which the backend

@@ -287,8 +287,8 @@ export default function DonateModal({ onClose }) {
             lineHeight: 1.7,
           }}
         >
-          NotesHub is <strong>100% free and ad-free</strong>. If it helped you
-          in your studies, consider supporting us - every contribution keeps
+          NotesHub is <strong>100% ad-free</strong>. If it helped you
+          in your studies, consider supporting us, every contribution keeps
           this platform alive!
         </p>
 

@@ -178,7 +178,7 @@ onClick={() => setShowDonate(true)}
             </div>
             <div>
               <p style={{ margin: 0, fontWeight: 700, fontSize: "1rem", color: "#0f172a" }}>
-                NotesHub is free & ad-free
+                NotesHub is ad-free
               </p>
               <p style={{ margin: "3px 0 0", fontSize: "0.82rem", color: "#64748b" }}>
                 If it helped you, consider supporting us with a small donation!

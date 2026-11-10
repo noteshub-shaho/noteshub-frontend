@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useRef } from "react";
 import { SESSION_EXPIRED_EVENT } from "../services/api";
+import client from "../services/api";
 
 const AuthContext = createContext();
 
@@ -22,10 +23,15 @@ export const AuthProvider = ({ children }) => {
     }
   });
 
-  // Listen for the session-expired event dispatched by the api.js response
-  // interceptor when both the access token and refresh token have expired.
-  // Without this handler the user stays on the page with broken API calls
-  // indefinitely instead of being redirected to login.
+  const hasPinged = useRef(false);
+
+  useEffect(() => {
+    if (isAuthenticated && !hasPinged.current) {
+      hasPinged.current = true;
+      client.post("/api/auth/ping").catch(() => {});
+    }
+  }, [isAuthenticated]);
+
   useEffect(() => {
     const handleSessionExpired = () => {
       localStorage.removeItem("token");

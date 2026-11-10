@@ -220,14 +220,15 @@ const Files = () => {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
 
-const [files, setFiles] = useState([]);
+  const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
   const [authGate, setAuthGate] = useState(null);
   const [merging, setMerging] = useState(false);
   const [downloadingIndex, setDownloadingIndex] = useState(null);
-const [showDonate, setShowDonate] = useState(false);
+  const [showDonate, setShowDonate] = useState(false);
   const donateShown = useRef(false);
+
 
   const token = localStorage.getItem("token");
 
@@ -283,7 +284,39 @@ const handleBack = () => {
     }
   };
 
-const isFolderProtected = isProtectedFolder(subject, subSubject);
+  useEffect(() => {
+    const noteKey = subSubject
+      ? `${university}/${semester}/${subject}/${subSubject}`
+      : `${university}/${semester}/${subject}`;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    fetch(`${import.meta.env.VITE_API_URL}/api/paid-notes/config/${noteKey}`, {
+      signal: controller.signal,
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.success && data.isEnabled) {
+          if (subSubject) {
+            navigate(`/paid-notes/${university}/${semester}/${subject}/${subSubject}`, { replace: true });
+          } else {
+            navigate(`/paid-notes/${university}/${semester}/${subject}`, { replace: true });
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => clearTimeout(timeoutId));
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [university, semester, subject, subSubject, navigate]);
+
+  const isFolderProtected = isProtectedFolder(subject, subSubject);
 
   
   const folderGate = isFolderProtected && !isAuthenticated;
